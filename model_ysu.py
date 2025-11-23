@@ -8,9 +8,12 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
-import scm
 from scm.closures.ysu import init_ysu_closure
+from scm.grid import StaggeredGrid
 from scm.interfaces import DiagVars, ProgVars, StaticForcing, ModelFn, ClosureFn, TransientForcing
+from scm.mo import MOSimilarityFuncs, init_mo_sfc, MOResult, BusingerDyerSimFuncs
+from scm.odeint import METHODS as ODE_METHODS
+from scm.odeint import init_time_stepper
 
 # jax.config.update("jax_disable_jit", True)
 jax.config.update("jax_enable_x64", True)
@@ -29,7 +32,7 @@ class SurfaceProperties:
 
     z0m: float
     z0h: float
-    sim_funcs: scm.mo.MOSimilarityFuncs
+    sim_funcs: MOSimilarityFuncs
     prescribe: Literal["th_s", "w_th_s"]  # todo: I don't like this here
 
     @property
@@ -37,11 +40,11 @@ class SurfaceProperties:
         return self.z0m / self.z0h
 
 
-def init_model(grid: scm.grid.StaggeredGrid, sfc: SurfaceProperties, closure_fn: ClosureFn) -> ModelFn:
+def init_model(grid: StaggeredGrid, sfc: SurfaceProperties, closure_fn: ClosureFn) -> ModelFn:
 
     # Create MO model
     z_mo = float(grid.z[0])
-    eval_mo = scm.mo.init_mo_sfc(
+    eval_mo = init_mo_sfc(
         z0m=sfc.z0m,
         z0h=sfc.z0h,
         z=z_mo,
@@ -61,7 +64,7 @@ def init_model(grid: scm.grid.StaggeredGrid, sfc: SurfaceProperties, closure_fn:
         w_th_s, th_s, w_q_s = forcing.w_th_s, forcing.th_s, forcing.w_q_s
 
         # Run MO for surface coupling
-        mo_res: scm.mo.MOResult = eval_mo(u_0=u[0], v_0=v[0], th_0=th[0], w_th_s=w_th_s, th_s=th_s, w_q_s=w_q_s)
+        mo_res: MOResult = eval_mo(u_0=u[0], v_0=v[0], th_0=th[0], w_th_s=w_th_s, th_s=th_s, w_q_s=w_q_s)
 
         # Compute vertical gradients of state for fluxes (half levels, 1st order finite differences)
         du_dz = jnp.zeros(grid.Nz_h)
@@ -126,7 +129,7 @@ def simulate(
     dt_s: float,
     t_end_s: float,
     dt_out_s: float,
-    ode_int: scm.odeint.METHODS,
+    ode_int: ODE_METHODS,
 ) -> Tuple[ProgVars, DiagVars, jnp.ndarray]:
     # Setup time arrays
     t_outer = jnp.arange(0, t_end_s, dt_out_s)
@@ -138,7 +141,7 @@ def simulate(
     )
 
     # Create time stepper
-    model_stepper = scm.odeint.init_time_stepper(model, dt=dt_s, method=ode_int)
+    model_stepper = init_time_stepper(model, dt=dt_s, method=ode_int)
 
     # Create forcing evaluation function
     get_forcing = forcing.get_eval_fn()
@@ -167,7 +170,7 @@ def simulate(
     return state_hist, diag_hist, t_outer
 
 
-def plot_state(state: scm.interfaces.ProgVars, grid: scm.grid.StaggeredGrid):
+def plot_state(state: ProgVars, grid: StaggeredGrid):
     """Plot initial conditions."""
     fig, (ax_uv, ax_th, ax_q) = plt.subplots(ncols=3, figsize=(8, 3), constrained_layout=True)
     ax_uv.plot(state.u, grid.z)
@@ -177,7 +180,7 @@ def plot_state(state: scm.interfaces.ProgVars, grid: scm.grid.StaggeredGrid):
     fig.show()
 
 
-def plot_hist(hist: List, t: jnp.ndarray, grid: scm.grid.StaggeredGrid, plot_sfc_val: bool, cmap: str = "viridis"):
+def plot_hist(hist: List, t: jnp.ndarray, grid: StaggeredGrid, plot_sfc_val: bool, cmap: str = "viridis"):
     """Plot history of diagnostics."""
 
     def _plot_profiles(keys):
@@ -247,7 +250,7 @@ def unstack_hist(v: T) -> List[T]:
     return [v_class(**{k: v_dict[k][i] for k in v_dict}) for i in range(n)]
 
 
-def get_ysu_init(grid: scm.grid.StaggeredGrid) -> scm.interfaces.ProgVars:
+def get_ysu_init(grid: StaggeredGrid) -> ProgVars:
     """Initial conditions from HND06"""
     z_inv = 500.0  # Inversion height in m
 
@@ -264,10 +267,10 @@ def get_ysu_init(grid: scm.grid.StaggeredGrid) -> scm.interfaces.ProgVars:
 
     v = jnp.zeros(grid.Nz)
 
-    return scm.interfaces.ProgVars(u=u, v=v, th=th, q=q)
+    return ProgVars(u=u, v=v, th=th, q=q)
 
 
-def get_ysu_bc(grid: scm.grid.StaggeredGrid) -> TransientForcing:
+def get_ysu_bc(grid: StaggeredGrid) -> TransientForcing:
     """Boundary conditions from HND06"""
 
     @jax.jit
@@ -301,7 +304,7 @@ def get_ysu_bc(grid: scm.grid.StaggeredGrid) -> TransientForcing:
 
 if __name__ == "__main__":
     # YSU test case
-    grid = scm.grid.StaggeredGrid(H=2750, Nz=138)
+    grid = StaggeredGrid(H=2750, Nz=138)
 
     ic = get_ysu_init(grid)
     forcing = get_ysu_bc(grid)
@@ -317,7 +320,7 @@ if __name__ == "__main__":
     # ax.plot(t_h, lhfx, label="LHFX")
     # fig.show()
 
-    sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=scm.mo.BusingerDyerSimFuncs(), prescribe="w_th_s")
+    sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs(), prescribe="w_th_s")
 
     # k_mo_closure = create_k_mo_closure(zh=grid.zh, sim_funcs=sfc.sim_funcs)
     model = init_model(grid, sfc, closure_fn=init_ysu_closure(grid=grid))

@@ -12,6 +12,7 @@ def v() -> ProgVars:
         u=jnp.array([1.0, 2.0, 3.0, 4.0]),
         v=jnp.array([4.0, 5.0, 6.0, 7.0]),
         th=jnp.array([7.0, 8.0, 9.0, 10.0]),
+        q=jnp.array([0.1, 0.2, 0.3, 0.4]),
     )
 
 
@@ -22,6 +23,7 @@ def d() -> DiagVars:
         u_w=jnp.array([1.0, 2.0, 3.0, 4.0]),
         v_w=jnp.array([4.0, 5.0, 6.0, 7.0]),
         w_th=jnp.array([7.0, 8.0, 9.0, 10.0]),
+        w_q=jnp.array([0.1, 0.2, 0.3, 0.4]),
     )
 
 
@@ -43,13 +45,13 @@ def test_jit(v: ProgVars, d: DiagVars):
 def test_as_tensor(v: ProgVars, d: DiagVars):
     """Test as_tensor methods of ProgVars and DiagVars."""
     tensor = v.as_tensor()
-    assert tensor.shape == (3, 4)  # 3 variables, 4 elements each
+    assert tensor.shape == (4, 4)  # 4 variables, 4 elements each
     assert jnp.all(tensor[0] == v.u)
     assert jnp.all(tensor[1] == v.v)
     assert jnp.all(tensor[2] == v.th)
 
     tensor_diag = d.as_tensor()
-    assert tensor_diag.shape == (3, 4)  # 3 variables, 4 elements each
+    assert tensor_diag.shape == (4, 4)  # 4 variables, 4 elements each
     assert jnp.all(tensor_diag[0] == d.u_w)
     assert jnp.all(tensor_diag[1] == d.v_w)
     assert jnp.all(tensor_diag[2] == d.w_th)
@@ -80,7 +82,7 @@ def test_as_tensor_compile(v: ProgVars):
         return v.as_tensor()
 
     tensor = _test_as_tensor(v)
-    assert tensor.shape == (3, 4)  # 3 variables, 4 elements each
+    assert tensor.shape == (4, 4)  # 4 variables, 4 elements each
     assert jnp.all(tensor[0] == v.u)
     assert jnp.all(tensor[1] == v.v)
     assert jnp.all(tensor[2] == v.th)

@@ -3,15 +3,18 @@ from __future__ import annotations
 import dataclasses
 from typing import List
 
-import scm.grid
 import xarray as xr
 from jax import numpy as jnp
 
-from interfaces import ProgVars, DiagVars
+from scm.interfaces import ProgVars, DiagVars
+from scm.grid import StaggeredGrid
 
 
 def make_dataset(
-    state_hist: List[ProgVars], diag_hist: List[DiagVars], time: jnp.ndarray, grid: scm.grid.StaggeredGrid
+    state_hist: List[ProgVars],
+    diag_hist: List[DiagVars],
+    time: jnp.ndarray,
+    grid: StaggeredGrid,
 ) -> xr.Dataset:
     """Convert history to xarray Dataset."""
     state_dict = dataclasses.asdict(state_hist[0])

@@ -9,6 +9,7 @@ dependencies = [
     "seaborn",
     "flax",
     "xarray",
+    "pytest>=9.0.1",
 ]
 
 [tool.black]
@@ -27,5 +28,5 @@ extend-exclude = '''
 
 [dependency-groups]
 dev = [
-    "ruff>=0.14.5",
+    "black"
 ]
