@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
+import cases
 from scm.closures.ysu import init_ysu_closure
 from scm.grid import StaggeredGrid
 from scm.interfaces import DiagVars, ProgVars, StaticForcing, ModelFn, ClosureFn, TransientForcing
@@ -90,10 +91,9 @@ def init_model(grid: StaggeredGrid, sfc: SurfaceProperties, closure_fn: ClosureF
         u_w, v_w, w_th, w_q = diag.u_w, diag.v_w, diag.w_th, diag.w_q  # unpack
 
         # Update fluxes with MO results
-        # todo: Not needed for YSU, I think because fluxes are already taken care of in PBL scheme
-        # u_w = u_w.at[0].set(mo_res.u_w)
-        # v_w = v_w.at[0].set(mo_res.v_w)
-        # w_th = w_th.at[0].set(mo_res.w_th)
+        u_w = u_w.at[0].set(mo_res.u_w)
+        v_w = v_w.at[0].set(mo_res.v_w)
+        w_th = w_th.at[0].set(mo_res.w_th)
 
         # Compute flux divergence (half levels -> full levels)
         div_u_w = (u_w[1:] - u_w[:-1]) / grid.dz
@@ -102,6 +102,7 @@ def init_model(grid: StaggeredGrid, sfc: SurfaceProperties, closure_fn: ClosureF
         div_w_q = (w_q[1:] - w_q[:-1]) / grid.dz
 
         # Compute tendencies
+        # todo: do I miss the non-local transport here?
         u_tend = f_c * v - f_c * v_geo - div_u_w
         v_tend = -f_c * u + f_c * u_geo - div_v_w
         th_tend = -div_w_th
@@ -250,85 +251,17 @@ def unstack_hist(v: T) -> List[T]:
     return [v_class(**{k: v_dict[k][i] for k in v_dict}) for i in range(n)]
 
 
-def get_ysu_init(grid: StaggeredGrid) -> ProgVars:
-    """Initial conditions from HND06"""
-    z_inv = 500.0  # Inversion height in m
-
-    th = jnp.ones(grid.Nz) * 300.0  # K
-    th = jnp.where(grid.z > z_inv, th + 0.01 * (grid.z - z_inv), th)  # linear decrease above inversion
-
-    q = jnp.ones(grid.Nz) * 15.0  # g/kg
-    q = jnp.where(grid.z > z_inv, q - 0.01 * (grid.z - z_inv), q)  # linear decrease above inversion up to 1500m
-    q = jnp.where(grid.z > 1500, 5.0, q)  # constant above 1500m
-    q = q / 1000
-
-    u = jnp.ones(grid.Nz) * 15.0  # m/s
-    u = jnp.where(grid.z < z_inv, (15 / 500) * grid.z, u)  # linear increase to 15 m/s at z_inv
-
-    v = jnp.zeros(grid.Nz)
-
-    return ProgVars(u=u, v=v, th=th, q=q)
-
-
-def get_ysu_bc(grid: StaggeredGrid) -> TransientForcing:
-    """Boundary conditions from HND06"""
-
-    @jax.jit
-    def _shfx(t_s: jnp.ndarray) -> jnp.ndarray:
-        """Surface heat flux as function of time in seconds after simulation begin."""
-        t_h = t_s / 3600.0  # time in hours
-        shfx = jnp.sin((t_h + 2) * jnp.pi / 12) * 400  # W/m2
-        shfx = shfx / 1216  # convert to (K m/s)
-        return shfx
-
-    @jax.jit
-    def _lhfx(t_s: jnp.ndarray) -> jnp.ndarray:
-        """Surface latent heat flux as function of time in seconds after simulation begin."""
-        t_h = t_s / 3600.0  # time in hours
-        lhfx = jnp.sin(t_h * jnp.pi / 12) * 200  # W/m2
-        lhfx = lhfx / 1225  # convert to (g/kg m/s)  # todo: correct like this?
-        return lhfx
-
-    @jax.jit
-    def _u_geo(_) -> jnp.ndarray:
-        """Constant geostrophic wind."""
-        return jnp.ones(grid.Nz) * 15.0
-
-    @jax.jit
-    def _v_geo(_) -> jnp.ndarray:
-        """Constant geostrophic wind."""
-        return jnp.zeros(grid.Nz)
-
-    return TransientForcing(u_geo=_u_geo, v_geo=_v_geo, f_c=1.39e-4, w_th_s=_shfx, w_q_s=_lhfx)
-
-
 if __name__ == "__main__":
+    # Ekman spiral
+    # grid, init, forcing = cases.get_ekman(Nz=100)
+
     # YSU test case
-    grid = StaggeredGrid(H=2750, Nz=138)
-
-    ic = get_ysu_init(grid)
-    forcing = get_ysu_bc(grid)
-
-    # plot_state(ic, grid)
-    #
-    # t_h = jnp.linspace(8, 20, 100)
-    # shfx = forcing.w_th_s((t_h - 8) * 3600)
-    # lhfx = forcing.w_q_s((t_h - 8) * 3600)
-    #
-    # fig, ax = plt.subplots(figsize=(5, 3), constrained_layout=True)
-    # ax.plot(t_h, shfx, label="SHFX")
-    # ax.plot(t_h, lhfx, label="LHFX")
-    # fig.show()
-
+    grid, init, forcing = cases.get_ysu()
     sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs(), prescribe="w_th_s")
 
-    # k_mo_closure = create_k_mo_closure(zh=grid.zh, sim_funcs=sfc.sim_funcs)
     model = init_model(grid, sfc, closure_fn=init_ysu_closure(grid=grid))
 
-    state_hist, diag_hist, t = simulate(model, ic, forcing, dt_s=1, t_end_s=45, dt_out_s=5, ode_int="euler")
-    # state_hist, diag_hist, t = simulate(
-    #     model, ic, forcing, dt_s=0.2, t_end_s=9 * 60 * 60, dt_out_s=60 * 60, ode_int="euler"
-    # )
+    state_hist, diag_hist, t = simulate(model, init, forcing, dt_s=0.01, t_end_s=60, dt_out_s=5, ode_int="euler")
     state_hist = unstack_hist(state_hist)
     diag_hist = unstack_hist(diag_hist)
 
