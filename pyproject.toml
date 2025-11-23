@@ -1,0 +1,31 @@
+[project]
+name = "scm_hybrid"
+version = "0.1.0"
+description = "An atmospheric single column model with numerical and machine learning components written in jax."
+requires-python = ">=3.12"
+dependencies = [
+    "jax==0.8.*",
+    "matplotlib",
+    "seaborn",
+    "flax",
+    "xarray",
+]
+
+[tool.black]
+line-length = 120  # align with pycharm
+# 'extend-exclude' excludes files or directories in addition to the defaults
+extend-exclude = '''
+# A regex preceded with ^/ will apply only to files and directories
+# in the root of the project.
+(
+  # Don't format submodules
+  ^/submodules
+  # This will match "research_tools" in any directory
+  | research_tools/
+)
+'''
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.5",
+]
