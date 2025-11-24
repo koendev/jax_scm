@@ -155,6 +155,7 @@ def init_ysu_closure(grid: scm.grid.StaggeredGrid) -> ClosureFn:
 
     @jax.jit
     def _closure(state: ProgVars, grads: ProgVars, mo_res: scm.mo.MOResult) -> DiagVars:
+        """Main function"""
         u, v, th, q = state.u, state.v, state.th, state.q
         m = jnp.sqrt(u**2 + v**2)  # magnitude of wind vector
         th_v = th * (1 + 0.61 * q)  # virtual potential temperature profile
@@ -244,10 +245,10 @@ def init_ysu_closure(grid: scm.grid.StaggeredGrid) -> ClosureFn:
 
         ## Compute fluxes
         # Everywhere in the bl, local mixing
-        u_w = Km * grads.u
-        v_w = Km * grads.v
-        w_th = Kt * grads.th
-        w_q = Kt * grads.q
+        u_w = -Km * grads.u
+        v_w = -Km * grads.v
+        w_th = -Kt * grads.th
+        w_q = -Kt * grads.q
 
         # Non-local mixing and entrainment in the bl
         is_bl = zh <= h

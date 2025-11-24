@@ -261,7 +261,7 @@ if __name__ == "__main__":
 
     model = init_model(grid, sfc, closure_fn=init_ysu_closure(grid=grid))
 
-    state_hist, diag_hist, t = simulate(model, init, forcing, dt_s=0.01, t_end_s=60, dt_out_s=5, ode_int="euler")
+    state_hist, diag_hist, t = simulate(model, init, forcing, dt_s=0.01, t_end_s=60 * 5, dt_out_s=30, ode_int="euler")
     state_hist = unstack_hist(state_hist)
     diag_hist = unstack_hist(diag_hist)
 
