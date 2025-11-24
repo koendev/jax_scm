@@ -15,6 +15,7 @@ from scm.interfaces import DiagVars, ProgVars, StaticForcing, ModelFn, ClosureFn
 from scm.mo import MOSimilarityFuncs, init_mo_sfc, MOResult, BusingerDyerSimFuncs
 from scm.odeint import METHODS as ODE_METHODS
 from scm.odeint import init_time_stepper
+from scm.utils import make_dataset
 
 # jax.config.update("jax_disable_jit", True)
 jax.config.update("jax_enable_x64", True)
@@ -102,7 +103,6 @@ def init_model(grid: StaggeredGrid, sfc: SurfaceProperties, closure_fn: ClosureF
         div_w_q = (w_q[1:] - w_q[:-1]) / grid.dz
 
         # Compute tendencies
-        # todo: do I miss the non-local transport here?
         u_tend = f_c * v - f_c * v_geo - div_u_w
         v_tend = -f_c * u + f_c * u_geo - div_v_w
         th_tend = -div_w_th
@@ -198,6 +198,7 @@ def plot_hist(hist: List, t: jnp.ndarray, grid: StaggeredGrid, plot_sfc_val: boo
 
         for ax, k in zip(axarr, keys):
             ax.set_xlabel(k)
+            ax.margins(y=0)
         axarr[0].set_ylabel("Height (m)")
 
         fig.show()
@@ -240,6 +241,7 @@ def plot_sfc_hist(hist: List[DiagVars | ProgVars], t: jnp.ndarray, keys: List[st
         ax.plot(t, sfc_vals[k])
         ax.set_xlabel("Time, s")
         ax.set_ylabel(k)
+        ax.margins(x=0)
 
     fig.show()
 
@@ -259,15 +261,17 @@ if __name__ == "__main__":
     grid, init, forcing = cases.get_ysu()
     sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs(), prescribe="w_th_s")
 
+    # Init and run model
     model = init_model(grid, sfc, closure_fn=init_ysu_closure(grid=grid))
+    state_hist, diag_hist, t = simulate(model, init, forcing, dt_s=1, t_end_s=2000, dt_out_s=10, ode_int="euler")
 
-    state_hist, diag_hist, t = simulate(model, init, forcing, dt_s=0.01, t_end_s=60 * 5, dt_out_s=30, ode_int="euler")
+    # Save output
+    ds = make_dataset(state_hist, diag_hist, time=t, grid=grid)
+    ds.to_netcdf("out.nc")
+
+    # Unstack for plotting
     state_hist = unstack_hist(state_hist)
     diag_hist = unstack_hist(diag_hist)
 
-    # ds = make_dataset(state_hist, diag_hist, time=t, grid=grid)
-    # ds.to_netcdf("out.nc")
-
     plot_hist(state_hist, t, grid, plot_sfc_val=True)
-    plot_hist(diag_hist, t, grid, plot_sfc_val=False)
-    # plot_sfc_hist(diag_hist, t=t, keys=["u_w", "v_w", "w_th"])
+    plot_hist(diag_hist, t, grid, plot_sfc_val=True)

@@ -21,6 +21,12 @@ class DiagVarsYSU(DiagVars):
     # Entrainment velocity
     w_e: jnp.ndarray
 
+    # Mixed layer velocity scale at z = h/2
+    w_s0: jnp.ndarray
+
+    # Temperature enhancement due to surface buoyancy flux
+    th_t: jnp.ndarray
+
     # Countergradient correction terms
     gamma_u: jnp.ndarray
     gamma_v: jnp.ndarray
@@ -101,7 +107,26 @@ def init_ysu_closure(grid: scm.grid.StaggeredGrid) -> ClosureFn:
 
     @jax.jit
     def _get_blh_enhanced(m, th_v, th_va, th_T):
-        """Enhanced estimate of boundary layer height."""
+        """Enhanced estimate of boundary layer height.
+
+        Parameters
+        ----------
+        m : jnp.ndarray
+            Wind speed profile, shape (Nz,).
+        th_v : jnp.ndarray
+            Virtual potential temperature profile, shape (Nz,).
+        th_va : jnp.array
+            Virtual potential temperature at lowest model level. Shape (1, ).
+        th_T : jnp.array
+            Temperature enhancement due to surface buoyancy flux. Shape (1, ).
+
+        Returns
+        -------
+        h : jnp.ndarray
+            Enhanced boundary layer height.
+        (i_bot, i_top) : Tuple[jnp.ndarray, jnp.ndarray]
+            Indices bracketing the enhanced boundary layer height.
+        """
 
         @jax.jit
         def _get_rib(h, m_h, th_v_h):
@@ -112,16 +137,14 @@ def init_ysu_closure(grid: scm.grid.StaggeredGrid) -> ClosureFn:
 
         # Initial guess: evaluate along entire column
         rib_h = _get_rib(h=grid.z, m_h=m, th_v_h=th_v)
-        i_init = jnp.argmin((rib_h - rib_cr_2) ** 2)
-
-        # i_init is bottom if sign change between i_init and i_init+1, else i_init is top
-        i_bot = jnp.where(jnp.sign(rib_h[i_init]) * jnp.sign(rib_h[i_init + 1]) < 0, i_init, i_init - 1)
-        i_top = i_bot + 1
+        i_top = jnp.searchsorted(-rib_h[::-1], -rib_cr_2) - 1  # find first index where rib_h <= rib_cr_2
+        i_top = grid.Nz - 1 - i_top  # flip index back
+        i_bot = i_top - 1
 
         # Select levels around initial guess and interpolate to find h where rib = rib_cr_2
-        i_init = jnp.array([-1, 0, 1]) + i_init  # indices around initial guess
-        i_init = jnp.clip(i_init, 0, grid.Nz - 1)  # ensure within bounds
-        h = jnp.interp(rib_cr_2, rib_h[i_init], grid.z[i_init])
+        i_interp = jnp.array([0, 1]) + i_bot  # indices around initial guess
+        i_interp = jnp.clip(i_interp, 0, grid.Nz - 1)  # ensure within bounds
+        h = jnp.interp(rib_cr_2, rib_h[i_interp], grid.z[i_interp])
 
         return h, (i_bot, i_top)
 
@@ -176,7 +199,7 @@ def init_ysu_closure(grid: scm.grid.StaggeredGrid) -> ClosureFn:
         ## BLH (z < h)
         # Initial guess for h without th_T
         h = _get_blh_init(m=m, th_v=th_v, th_va=th_va)
-        w_s0, _ = _get_w_s(h=h, w_thv_s=w_thv_s, u_st=u_st, L=L_ob, th_va=th_va, z=h / 2)
+        w_s0, _ = _get_w_s(h=h, w_thv_s=w_thv_s, u_st=u_st, L=L_ob, th_va=th_va, z=h / 2)  # at z=h/2, inline after (A3)
 
         # Enhanced h
         th_t = jnp.minimum(b * w_thv_s / w_s0, 3)  # eq. 2, capped at 3K, p. 2320
@@ -237,7 +260,7 @@ def init_ysu_closure(grid: scm.grid.StaggeredGrid) -> ClosureFn:
         Kt = _combine_K(Kt_bl, Kt_ent, Kt_loc, i_h_top)
 
         ## Compute countergradient correction
-        # todo: really ws0 or ws?
+        # Only based on surface values
         gamma_th = b * w_th_s / (w_s0 * h)  # eq. A3
         gamma_q = b * w_q_h / (w_s0 * h)  # eq. A3
         gamma_u = b * u_w_s / (w_s0 * h)  # eq. A3
@@ -245,10 +268,10 @@ def init_ysu_closure(grid: scm.grid.StaggeredGrid) -> ClosureFn:
 
         ## Compute fluxes
         # Everywhere in the bl, local mixing
-        u_w = -Km * grads.u
-        v_w = -Km * grads.v
-        w_th = -Kt * grads.th
-        w_q = -Kt * grads.q
+        u_w = Km * grads.u
+        v_w = Km * grads.v
+        w_th = Kt * grads.th
+        w_q = Kt * grads.q
 
         # Non-local mixing and entrainment in the bl
         is_bl = zh <= h
@@ -256,6 +279,12 @@ def init_ysu_closure(grid: scm.grid.StaggeredGrid) -> ClosureFn:
         w_q = jnp.where(is_bl, w_q - Kt * gamma_q - w_q_h * (zh / h) ** 3, w_q)
         u_w = jnp.where(is_bl, u_w - Km * gamma_u - u_w_h * (zh / h) ** 3, u_w)
         v_w = jnp.where(is_bl, v_w - Km * gamma_v - v_w_h * (zh / h) ** 3, v_w)
+
+        # Change sign of all fluxes. This is not stated in HND06, but only way that simulation doesn't blow up.
+        u_w = -u_w
+        v_w = -v_w
+        w_th = -w_th
+        w_q = -w_q
 
         return DiagVarsYSU(
             u_w=u_w,  # noqa: x and y in where provided
@@ -270,6 +299,8 @@ def init_ysu_closure(grid: scm.grid.StaggeredGrid) -> ClosureFn:
             gamma_th=gamma_th,
             gamma_q=gamma_q,
             w_e=w_e,
+            w_s0=w_s0,
+            th_t=th_t,
         )
 
     return _closure

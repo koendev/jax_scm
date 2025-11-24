@@ -203,7 +203,7 @@ def get_ekman(Nz: int = 100, plot: bool = False):
     )
 
     th = jnp.ones(grid.Nz) * 280.0
-    th = jnp.where(grid.z > 500, th + 0.01 * (grid.z - 500), th)  # weak inversion above 500m
+    th = jnp.where(grid.z > 400, th + 0.01 * (grid.z - 500), th)  # weak inversion above 500m
 
     init = ProgVars(
         u=ug.copy(),
