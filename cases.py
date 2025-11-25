@@ -97,7 +97,9 @@ def get_gabls1(
     return grid, init, forcing
 
 
-def get_ysu(Nz: int = 138, plot: bool = False, debug_dt: float = 0) -> Tuple[StaggeredGrid, ProgVars, TransientForcing]:
+def get_ysu(
+    Nz: int = 138, plot: bool = False, debug_dt: float = 0
+) -> Tuple[StaggeredGrid, ProgVarsMYNN, TransientForcing]:
     """Initial conditions and forcing from HND06
 
     Use debug_dt to shift the time of the forcing functions for debugging purposes.
@@ -115,12 +117,19 @@ def get_ysu(Nz: int = 138, plot: bool = False, debug_dt: float = 0) -> Tuple[Sta
     q = jnp.where(grid.z > 1500, 5.0, q)  # constant above 1500m
     q = q / 1000
 
+    thv = th * (1 + 0.61 * q)  # virtual potential temperature
+
     u = jnp.ones(grid.Nz) * 15.0  # m/s
     u = jnp.where(grid.z < z_inv, (15 / 500) * grid.z, u)  # linear increase to 15 m/s at z_inv
 
     v = jnp.zeros(grid.Nz)
 
-    init = ProgVars(u=u, v=v, th=th, q=q)
+    init = ProgVarsMYNN(
+        u=u,
+        v=v,
+        thv=thv,
+        q_sq=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
+    )
 
     # Forcing
     @jax.jit
@@ -159,10 +168,10 @@ def get_ysu(Nz: int = 138, plot: bool = False, debug_dt: float = 0) -> Tuple[Sta
         ax_uv.set_xlabel("Wind (m/s)")
         ax_uv.set_ylabel("Height (m)")
         ax_uv.legend()
-        ax_th.plot(init.th, grid.z)
+        ax_th.plot(init.thv, grid.z)
         ax_th.set_xlabel("Potential Temperature (K)")
-        ax_q.plot(init.q * 1000, grid.z)
-        ax_q.set_xlabel("Specific Humidity (g/kg)")
+        # ax_q.plot(init.q * 1000, grid.z)
+        # ax_q.set_xlabel("Specific Humidity (g/kg)")
         fig.show()
 
         # Forcing plots
@@ -192,18 +201,18 @@ def get_ekman(Nz: int = 100, plot: bool = False):
         u_geo=lambda t: ug,
         v_geo=lambda t: vg,
         f_c=1e-4,
-        w_th_s=lambda t: 0.0,  # neutral stratification
-        w_q_s=lambda t: 0.0,
+        w_th_s=lambda t: jnp.array(0.0),  # neutral stratification
+        w_q_s=lambda t: jnp.array(0.0),
     )
 
-    th = jnp.ones(grid.Nz) * 280.0
-    th = jnp.where(grid.z > 400, th + 0.01 * (grid.z - 500), th)  # weak inversion above 500m
+    thv = jnp.ones(grid.Nz) * 280.0
+    thv = jnp.where(grid.z > 400, thv + 0.01 * (grid.z - 500), thv)  # weak inversion above 500m
 
-    init = ProgVars(
+    init = ProgVarsMYNN(
         u=ug.copy(),
         v=vg.copy(),
-        th=th,
-        q=jnp.zeros(grid.Nz),
+        thv=thv,
+        q_sq=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
     )
 
     if plot:
@@ -213,7 +222,7 @@ def get_ekman(Nz: int = 100, plot: bool = False):
         ax_uv.set_xlabel("Wind (m/s)")
         ax_uv.set_ylabel("Height (m)")
         ax_uv.legend()
-        ax_th.plot(init.th, grid.z)
+        ax_th.plot(init.thv, grid.z)
         ax_th.set_xlabel("Potential Temperature (K)")
         fig.show()
 

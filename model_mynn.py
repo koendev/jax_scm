@@ -309,26 +309,18 @@ if __name__ == "__main__":
     # Ekman spiral
     # grid, init, forcing = cases.get_ekman(Nz=100)
 
-    # # YSU test case
-    # # t_debug = 33000 + 500
-    # t_debug = 0
-    # grid, init, forcing = cases.get_ysu(debug_dt=t_debug)
-    # init = ProgVarsMYNN(
-    #     u=init.u,
-    #     v=init.v,
-    #     thv=init.th,
-    #     q_sq=jnp.ones(grid.Nz) * 0.01,
-    # )
-    # # init = init_from_xr("out_debug.nc", t=t_debug)
+    # YSU test case
+    # t_debug = 33000 + 500
+    t_debug = 0
+    grid, init, forcing = cases.get_ysu(debug_dt=t_debug)
 
     # GABLS
-    grid, init, forcing = cases.get_gabls1(Nz=200)
-    sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs())
+    # grid, init, forcing = cases.get_gabls1(Nz=200)
 
     # Init and run model
-    model = init_model(grid, sfc, prescribe_sfc_heat="th_s")
-    # state_hist, diag_hist, t = simulate(model, init, forcing, dt_s=0.1, t_end_s=60 * 10, dt_out_s=0.1)
-    state_hist, diag_hist, mo_hist, t = simulate(model, init, forcing, dt_s=0.1, t_end_s=60 * 60 * 9, dt_out_s=60 * 5)
+    sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs())
+    model = init_model(grid, sfc, prescribe_sfc_heat="th_s" if forcing.w_th_s is None else "w_th_s")
+    state_hist, diag_hist, mo_hist, t = simulate(model, init, forcing, dt_s=0.1, t_end_s=60 * 60 * 12, dt_out_s=60 * 5)
 
     # Save output
     ds = make_dataset(state_hist, diag_hist, mo_hist, time=t, grid=grid)
