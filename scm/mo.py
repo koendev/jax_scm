@@ -26,10 +26,10 @@ class MOResult:
     L: jnp.ndarray  # Obukhov length
     zeta: jnp.ndarray  # Stability parameter (z/L)
     zeta_err: jnp.ndarray  # Relative error in zeta convergence
-    du_dz: jnp.ndarray  # Vertical gradient of u component
-    dv_dz: jnp.ndarray  # Vertical gradient of v component
-    dth_dz: jnp.ndarray  # Vertical gradient of theta
-    dq_dz: jnp.ndarray  # Vertical gradient of specific humidity
+    # du_dz: jnp.ndarray  # Vertical gradient of u component
+    # dv_dz: jnp.ndarray  # Vertical gradient of v component
+    # dth_dz: jnp.ndarray  # Vertical gradient of theta
+    # dq_dz: jnp.ndarray  # Vertical gradient of specific humidity
     m10: jnp.ndarray  # 10m wind speed following MOST
     th2: jnp.ndarray  # 2m temperature following MOST
     th_s: jnp.ndarray  # Surface temperature
@@ -133,9 +133,9 @@ def init_mo_sfc(
     z0m: float,
     z0h: float,
     z: float,
-    z_grad: float,
     sim_funcs: MOSimilarityFuncs,
     prescribe: Literal["w_th_s", "th_s"],
+    n_iter: int = 10,
 ) -> Callable:
     """Create a Monin-Obukhov similarity model for surface fluxes.
 
@@ -148,14 +148,13 @@ def init_mo_sfc(
     z: float
         Height at which the model is evaluated, m
         (typically, height of lowest full level)
-    z_grad: float
-        Height at which the vertical gradient is evaluated, m
-        (typically, halfway between surface and lowest full level)
     sim_funcs: MOSimilarityFuncs
         Similarity functions to use for the model
     prescribe: Literal["w_th_s", "th_s"]
         Flag indicating if surface sensible heat flux (`w_th_s`) or surface temperature (`th_s`) is prescribed.
         The other variable will be computed based on the prescribed one.
+    n_iter: int
+        Number of iterations to use when solving for stability parameter zeta.
 
     Returns
     -------
@@ -195,8 +194,8 @@ def init_mo_sfc(
 
         return u_st, w_th, th_s
 
-    @functools.partial(jax.jit, static_argnames=("n_iter"))
-    def _get_zeta_fixed_iter(m_0, th_0, w_th, th_s, n_iter=10) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    @jax.jit
+    def _get_zeta_fixed_iter(m_0, th_0, w_th, th_s) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Get zeta using fixed number of iterations."""
         # zeta = jnp.where(w_th != 0.0, -jnp.sign(w_th) * 10.0, 0.0)
         zeta = 0
@@ -214,12 +213,12 @@ def init_mo_sfc(
     @jax.jit
     def _eval_mo(
         *,
-        u_0: float,
-        v_0: float,
-        th_0: float,
-        w_q_s: float,
-        w_th_s: float | None = None,
-        th_s: float | None = None,
+        u_0: jnp.ndarray | float,
+        v_0: jnp.ndarray | float,
+        th_0: jnp.ndarray | float,
+        w_q_s: jnp.ndarray | float,
+        w_th_s: jnp.ndarray | float | None = None,
+        th_s: jnp.ndarray | float | None = None,
     ) -> MOResult:
         """Compute surface fluxes using Monin-Obukhov similarity theory
 
@@ -255,7 +254,7 @@ def init_mo_sfc(
         # Evaluate MOST with solved zeta
         u_st, w_th_s, th_s = _eval_most(zeta, m_0, th_0, w_th_s, th_s)
         th_st = -w_th_s / u_st
-        q_st = -w_q_s / u_st
+        # q_st = -w_q_s / u_st
 
         # Compute stresses at surface. Defined as -uw = ust^2
         u_w_s = -(u_st**2) * u_0 / m_0
@@ -263,13 +262,13 @@ def init_mo_sfc(
 
         # Compute gradients based on converged Obukhov length and fluxes
         # Claude suggests to evaluate gradients halfway between surface and lowest full level
-        dm_dz = phi_m_fn(zeta * z_grad / z) * u_st / (consts.kappa * z)
-        dth_dz = phi_h_fn(zeta * z_grad / z) * th_st / (consts.kappa * z)
-        dq_dz = phi_h_fn(zeta * z_grad / z) * q_st / (consts.kappa * z)
+        # dm_dz = phi_m_fn(zeta * z_grad / z) * u_st / (consts.kappa * z)
+        # dth_dz = phi_h_fn(zeta * z_grad / z) * th_st / (consts.kappa * z)
+        # dq_dz = phi_h_fn(zeta * z_grad / z) * q_st / (consts.kappa * z)
 
         # Split into u and v
-        du_dz = dm_dz * u_0 / m_0
-        dv_dz = dm_dz * v_0 / m_0
+        # du_dz = dm_dz * u_0 / m_0
+        # dv_dz = dm_dz * v_0 / m_0
 
         # Compute m10 and th2 as aux outputs
         m10 = u_st * (jnp.log(10 / z0m) - psi_m_fn(zeta * (10 / z)) + psi_m_fn(zeta * (z0m / z))) / consts.kappa
@@ -283,10 +282,10 @@ def init_mo_sfc(
             L=L,
             zeta=zeta,
             zeta_err=zeta_err,
-            du_dz=du_dz,
-            dv_dz=dv_dz,
-            dth_dz=dth_dz,
-            dq_dz=dq_dz,
+            # du_dz=du_dz,
+            # dv_dz=dv_dz,
+            # dth_dz=dth_dz,
+            # dq_dz=dq_dz,
             m10=m10,
             th2=th2,
             th_s=th_s,
