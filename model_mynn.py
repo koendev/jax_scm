@@ -11,13 +11,13 @@ import matplotlib.pyplot as plt
 import cases
 from scm.closures.mynn import init_mynn, ProgVarsMYNN, DiagVarsMYNN
 from scm.grid import StaggeredGrid
-from scm.interfaces import DiagVars, ProgVars, StaticForcing, ModelFn, ClosureFn, TransientForcing
+from scm.interfaces import StaticForcing, ModelFn, ClosureFn, TransientForcing
 from scm.mo import MOSimilarityFuncs, init_mo_sfc, MOResult, BusingerDyerSimFuncs
 from scm.odeint import METHODS as ODE_METHODS
 from scm.odeint import init_time_stepper
 from scm.utils import make_dataset
 
-# jax.config.update("jax_disable_jit", True)
+jax.config.update("jax_disable_jit", True)
 jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax_platforms", "cpu")
 # jax.config.update("jax_debug_nans", True)
@@ -42,7 +42,19 @@ class SurfaceProperties:
         return self.z0m / self.z0h
 
 
-def init_model(grid: StaggeredGrid, sfc: SurfaceProperties, closure_fn: ClosureFn) -> ModelFn:
+def d_dz(a: jnp.ndarray, dz: float, bot: jnp.ndarray | float, top: jnp.ndarray | float) -> jnp.ndarray:
+    """Compute vertical gradient of a at half levels using first-order finite differences.
+    todo: improve padding to repeat edge values instead of zeros
+    """
+    Nz = len(a)
+    da_dz = jnp.zeros(Nz + 1)  # half levels
+    da_dz = da_dz.at[1:-1].set((a[1:] - a[:-1]) / dz)
+    da_dz = da_dz.at[0].set(bot)
+    da_dz = da_dz.at[-1].set(top)
+    return da_dz
+
+
+def init_model(grid: StaggeredGrid, sfc: SurfaceProperties) -> ModelFn:
 
     # Create MO model
     z_mo = float(grid.z[0])
@@ -55,10 +67,14 @@ def init_model(grid: StaggeredGrid, sfc: SurfaceProperties, closure_fn: ClosureF
         prescribe=sfc.prescribe,
     )
 
+    # Init MYNN scheme
+    closure_fn = init_mynn(grid=grid)
+
     @jax.jit
-    def _model(state: ProgVarsMYNN, forcing: StaticForcing) -> Tuple[ProgVars, DiagVars]:
+    def _model(state: ProgVarsMYNN, forcing: StaticForcing) -> Tuple[ProgVarsMYNN, DiagVarsMYNN]:
         # Unpack state
-        u, v, q = state.u, state.v, state.q
+        u, v, thv, q_sq = state.u, state.v, state.thv, state.q_sq
+        th = thv  # todo: proper conversion
 
         # Unpack forcing
         f_c = forcing.f_c
@@ -68,49 +84,44 @@ def init_model(grid: StaggeredGrid, sfc: SurfaceProperties, closure_fn: ClosureF
         # Run MO for surface coupling
         mo_res: MOResult = eval_mo(u_0=u[0], v_0=v[0], th_0=th[0], w_th_s=w_th_s, th_s=th_s, w_q_s=w_q_s)
 
+        # todo: proper conversion
+        dthv_dz_s = mo_res.dth_dz
+        dthv_dz_top = forcing.dth_dz_top
+        w_thv_s = mo_res.w_th
+
         # Compute vertical gradients of state for fluxes (half levels, 1st order finite differences)
-        du_dz = jnp.zeros(grid.Nz_h)
-        du_dz = du_dz.at[1:-1].set((u[1:] - u[:-1]) / grid.dz)
-        du_dz = du_dz.at[0].set(mo_res.du_dz)
+        du_dz = d_dz(u, dz=grid.dz, bot=mo_res.du_dz, top=0.0)
+        dv_dz = d_dz(v, dz=grid.dz, bot=mo_res.dv_dz, top=0.0)
+        dthv_dz = d_dz(thv, dz=grid.dz, bot=dthv_dz_s, top=dthv_dz_top)
+        dqsq_dz = d_dz(q_sq, dz=grid.dz, bot=0.0, top=0.0)  # todo: lower BC = 0 ok?
+        grads = ProgVarsMYNN(u=du_dz, v=dv_dz, thv=dthv_dz, q_sq=dqsq_dz)
 
-        dv_dz = jnp.zeros(grid.Nz_h)
-        dv_dz = dv_dz.at[1:-1].set((v[1:] - v[:-1]) / grid.dz)
-        dv_dz = dv_dz.at[0].set(mo_res.dv_dz)
-
-        dth_dz = jnp.zeros(grid.Nz_h)
-        dth_dz = dth_dz.at[1:-1].set((th[1:] - th[:-1]) / grid.dz)
-        dth_dz = dth_dz.at[0].set(mo_res.dth_dz)
-        dth_dz = dth_dz.at[-1].set(forcing.dth_dz_top)
-
-        dq_dz = jnp.zeros(grid.Nz_h)
-        dq_dz = dq_dz.at[1:-1].set((q[1:] - q[:-1]) / grid.dz)
-        dq_dz = dq_dz.at[0].set(mo_res.dq_dz)
-
-        # PBL SCHEME on half levels
-        grads = ProgVars(u=du_dz, v=dv_dz, th=dth_dz, q=dq_dz)
+        # PBL scheme on half levels
         diag = closure_fn(state, grads, mo_res)
-        u_w, v_w, w_th, w_q = diag.u_w, diag.v_w, diag.w_th, diag.w_q  # unpack
+        u_w, v_w, thv_w = diag.u_w, diag.v_w, diag.thv_w  # unpack
+        q_sq_w = diag.q_sq_tt  # todo: not sure about naming here
 
         # Update fluxes with MO results
+        # todo: any update for TKE needed?
         u_w = u_w.at[0].set(mo_res.u_w)
         v_w = v_w.at[0].set(mo_res.v_w)
-        w_th = w_th.at[0].set(mo_res.w_th)
+        thv_w = thv_w.at[0].set(w_thv_s)
 
         # Compute flux divergence (half levels -> full levels)
         div_u_w = (u_w[1:] - u_w[:-1]) / grid.dz
         div_v_w = (v_w[1:] - v_w[:-1]) / grid.dz
-        div_w_th = (w_th[1:] - w_th[:-1]) / grid.dz
-        div_w_q = (w_q[1:] - w_q[:-1]) / grid.dz
+        div_thv_w = (thv_w[1:] - thv_w[:-1]) / grid.dz
+        div_qsq_w = (q_sq_w[1:] - q_sq_w[:-1]) / grid.dz
 
         # Compute tendencies
         u_tend = f_c * v - f_c * v_geo - div_u_w
         v_tend = -f_c * u + f_c * u_geo - div_v_w
-        th_tend = -div_w_th
-        q_tend = -div_w_q
+        thv_tends = -div_thv_w
+        q_sq_tend = diag.q_sq_P_S + diag.q_sq_P_B - diag.q_sq_eps + div_qsq_w
 
         # Gather tendencies and updated diagnostics
-        tends = ProgVars(u=u_tend, v=v_tend, th=th_tend, q=q_tend)
-        diag = update_dc_obj(diag, u_w=u_w, v_w=v_w, w_th=w_th)
+        tends = ProgVarsMYNN(u=u_tend, v=v_tend, thv=thv_tends, q_sq=q_sq_tend)
+        diag = update_dc_obj(diag, u_w=u_w, v_w=v_w, thv_w=thv_w)
         return tends, diag
 
     return _model
@@ -125,13 +136,13 @@ def update_dc_obj(d: T, **updates) -> T:
 
 def simulate(
     model: ModelFn,
-    ic: ProgVars,
+    ic: ProgVarsMYNN,
     forcing: TransientForcing,
     dt_s: float,
     t_end_s: float,
     dt_out_s: float,
     ode_int: ODE_METHODS,
-) -> Tuple[ProgVars, DiagVars, jnp.ndarray]:
+) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, jnp.ndarray]:
     # Setup time arrays
     t_outer = jnp.arange(0, t_end_s, dt_out_s)
     rel_t_inner = jnp.arange(0, dt_out_s, dt_s)
@@ -171,13 +182,13 @@ def simulate(
     return state_hist, diag_hist, t_outer
 
 
-def plot_state(state: ProgVars, grid: StaggeredGrid):
+def plot_state(state: ProgVarsMYNN, grid: StaggeredGrid):
     """Plot initial conditions."""
-    fig, (ax_uv, ax_th, ax_q) = plt.subplots(ncols=3, figsize=(8, 3), constrained_layout=True)
+    fig, (ax_uv, ax_thv, ax_q_sq) = plt.subplots(ncols=3, figsize=(8, 3), constrained_layout=True)
     ax_uv.plot(state.u, grid.z)
     ax_uv.plot(state.v, grid.z)
-    ax_th.plot(state.th, grid.z)
-    ax_q.plot(state.q, grid.z)
+    ax_thv.plot(state.thv, grid.z)
+    ax_q_sq.plot(state.q_sq, grid.z)
     fig.show()
 
 
@@ -220,7 +231,7 @@ def plot_hist(hist: List, t: jnp.ndarray, grid: StaggeredGrid, plot_sfc_val: boo
         plot_sfc_hist(hist, t=t, keys=keys_ts)
 
 
-def plot_sfc_hist(hist: List[DiagVars | ProgVars], t: jnp.ndarray, keys: List[str] = None):
+def plot_sfc_hist(hist: List[DiagVarsMYNN | ProgVarsMYNN], t: jnp.ndarray, keys: List[str] = None):
     """Plot history of diagnostics at surface."""
     if keys is None:
         keys = list(dataclasses.asdict(hist[0]).keys())
@@ -259,10 +270,16 @@ if __name__ == "__main__":
 
     # YSU test case
     grid, init, forcing = cases.get_ysu()
+    init = ProgVarsMYNN(
+        u=init.u,
+        v=init.v,
+        thv=init.th,
+        q_sq=jnp.ones(grid.Nz) * 0.01,
+    )
     sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs(), prescribe="w_th_s")
 
     # Init and run model
-    model = init_model(grid, sfc, closure_fn=init_ysu_closure(grid=grid))
+    model = init_model(grid, sfc)
     state_hist, diag_hist, t = simulate(
         model, init, forcing, dt_s=0.1, t_end_s=60 * 60 * 10, dt_out_s=10, ode_int="euler"
     )
