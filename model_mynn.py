@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import time
 import logging
 from typing import Tuple, List, Literal, TypeVar
 
@@ -24,6 +25,56 @@ logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("scm")
 
 T = TypeVar("T")
+
+
+class IterationTimer:
+    def __init__(self, n_total: int):
+        self.last_time = None
+        self.start_time = None
+        self.n_total = n_total
+        self.i = 0
+
+    @staticmethod
+    def _format_long_duration(d: float) -> str:
+        unit = "s"
+        if d > 120:
+            d /= 60
+            unit = "min"
+        if d > 120:
+            d /= 60
+            unit = "h"
+        return f"{d:.1f}{unit}"
+
+    def callback(self, t: int):
+        current_time = time.time()
+        perc_done = self.i / (self.n_total - 1) * 100
+
+        if self.last_time is None:
+            self.start_time = current_time
+            print(f"t={t} ({perc_done:.0f}%)")
+        else:
+            duration = current_time - self.last_time
+            eta = duration * (self.n_total - self.i)
+            eta_f = self._format_long_duration(eta)
+            print(f"t={t} ({perc_done:.0f}%), this iter: {duration:.2f}s, ETA: {eta_f}")
+
+        self.last_time = current_time
+        self.i += 1
+
+    def finalize(self):
+        current_time = time.time()
+        print(f"Total elapsed time: {self._format_long_duration(current_time - self.start_time)}")
+
+
+@dataclasses.dataclass
+class Simulation:
+    name: str
+    grid: StaggeredGrid
+    init: ProgVarsMYNN
+    forcing: TransientForcing
+    t_start_s: int
+    t_end_s: int
+    dt: float
 
 
 @dataclasses.dataclass
@@ -183,11 +234,12 @@ def simulate(
     # Inner steps shifted by dt because initial Euler step is taken outside loop
     t_outer = jnp.arange(t_start_s, t_end_s, dt_out_s)
     rel_t_inner = jnp.arange(0, dt_out_s, dt_s) + dt_s  # relative to outer step
-    jax.debug.print(
+    print(
         f"Inner steps: {len(rel_t_inner)}, "
         f"Outer steps: {len(t_outer)}, "
         f"Total steps: {len(t_outer) * len(rel_t_inner)}"
     )
+    timer = IterationTimer(n_total=len(t_outer))
 
     # Create forcing evaluation function
     get_forcing = forcing.get_eval_fn()
@@ -203,13 +255,14 @@ def simulate(
     def _scan_outer(carry, t):
         """Advance model by inner steps and accumulate outputs"""
         carry_new, _ = jax.lax.scan(_scan_inner, init=carry, xs=t + rel_t_inner)
-        jax.debug.print("t={t} ({frac_done:.2f}%)", t=t + dt_out_s, frac_done=100 * (t + dt_out_s) / t_end_s)
+        jax.debug.callback(timer.callback, t + dt_out_s)
         return carry_new, carry_new
 
     jax.debug.print("Begin simulation...")
     y0 = ic
     y1, dydt0, diag0, mo_res0 = _euler(y0, forcing=get_forcing(t_outer[0]))  # Warmup: one Euler step
     _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, dydt0, diag0, mo_res0), xs=t_outer)
+    timer.finalize()
     return y_hist, diag_hist, mo_hist, t_outer
 
 
@@ -321,10 +374,10 @@ if __name__ == "__main__":
     # grid, init, forcing = cases.get_ysu(debug_dt=t_debug)
 
     # GABLS
-    # grid, init, forcing = cases.get_gabls1(Nz=200)
+    # grid, init, forcing = cases.get_gabls1(Nz=64)
 
     # Wangara
-    grid, init, forcing = cases.get_wangara()
+    grid, init, forcing = cases.get_wangara(Nz=2000)
 
     # Init and run model
     sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs())
@@ -333,7 +386,7 @@ if __name__ == "__main__":
         model,
         init,
         forcing,
-        dt_s=0.5,
+        dt_s=0.001,
         t_start_s=9 * 60 * 60,
         t_end_s=16 * 60 * 60,
         dt_out_s=60 * 5,
