@@ -9,7 +9,20 @@ import dataclasses
 import jax.numpy as jnp
 import jax.tree_util
 
+from scm.closures.mynn import ProgVarsMYNN
+from scm.grid import StaggeredGrid
+
 from scm.mo import MOResult
+
+
+@dataclasses.dataclass
+class Simulation:
+    name: str
+    grid: StaggeredGrid
+    init: ProgVarsMYNN
+    forcing: TransientForcing
+    t_start_s: int
+    t_end_s: int
 
 
 @jax.tree_util.register_dataclass

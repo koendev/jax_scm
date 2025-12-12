@@ -14,6 +14,19 @@ logger = logging.getLogger("scm.mo")
 SimFuncType = Callable[[jnp.ndarray], jnp.ndarray]
 
 
+@dataclasses.dataclass
+class SurfaceProperties:
+    """Surface properties for the model."""
+
+    z0m: float
+    z0h: float
+    sim_funcs: MOSimilarityFuncs
+
+    @property
+    def mh_ratio(self):
+        return self.z0m / self.z0h
+
+
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True)
 class MOResult:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import time
 import logging
 from typing import Tuple, List, Literal, TypeVar
 
@@ -13,8 +12,9 @@ import matplotlib.pyplot as plt
 import cases
 from scm.closures.mynn import init_mynn, ProgVarsMYNN, DiagVarsMYNN, ModelFn
 from scm.grid import StaggeredGrid
-from scm.interfaces import StaticForcing, TransientForcing
-from scm.mo import MOSimilarityFuncs, init_mo_sfc, MOResult, BusingerDyerSimFuncs
+from scm.interfaces import StaticForcing
+from scm.mo import init_mo_sfc, MOResult, BusingerDyerSimFuncs, SurfaceProperties
+from scm.time_stepping import simulate_adaptive_dt
 from scm.utils import make_dataset
 
 # jax.config.update("jax_disable_jit", True)
@@ -26,69 +26,6 @@ logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("scm")
 
 T = TypeVar("T")
-
-
-class IterationTimer:
-    def __init__(self, n_total: int):
-        self.last_time = None
-        self.start_time = None
-        self.n_total = n_total
-        self.i = 0
-
-    @staticmethod
-    def _format_long_duration(d: float) -> str:
-        unit = "s"
-        if d > 120:
-            d /= 60
-            unit = "min"
-        if d > 120:
-            d /= 60
-            unit = "h"
-        return f"{d:.1f}{unit}"
-
-    def callback(self, t: int):
-        current_time = time.time()
-        perc_done = self.i / (self.n_total - 1) * 100
-
-        if self.last_time is None:
-            self.start_time = current_time
-            print(f"t={t} ({perc_done:.0f}%)")
-        else:
-            duration = current_time - self.last_time
-            eta = duration * (self.n_total - self.i)
-            eta_f = self._format_long_duration(eta)
-            print(f"t={t} ({perc_done:.0f}%), this iter: {duration:.2f}s, ETA: {eta_f}")
-
-        self.last_time = current_time
-        self.i += 1
-
-    def finalize(self):
-        current_time = time.time()
-        print(f"Total elapsed time: {self._format_long_duration(current_time - self.start_time)}")
-
-
-@dataclasses.dataclass
-class Simulation:
-    name: str
-    grid: StaggeredGrid
-    init: ProgVarsMYNN
-    forcing: TransientForcing
-    t_start_s: int
-    t_end_s: int
-    dt: float
-
-
-@dataclasses.dataclass
-class SurfaceProperties:
-    """Surface properties for the model."""
-
-    z0m: float
-    z0h: float
-    sim_funcs: MOSimilarityFuncs
-
-    @property
-    def mh_ratio(self):
-        return self.z0m / self.z0h
 
 
 def d_dz(a: jnp.ndarray, dz: float, bot: jnp.ndarray | float | str, top: jnp.ndarray | float | str) -> jnp.ndarray:
@@ -193,176 +130,6 @@ def update_dc_obj(d: T, **updates) -> T:
     d_dict = dataclasses.asdict(d)
     d_dict.update(updates)
     return d.__class__(**d_dict)
-
-
-def simulate(
-    model: ModelFn,
-    ic: ProgVarsMYNN,
-    forcing: TransientForcing,
-    dt_s: float,
-    t_end_s: float,
-    dt_out_s: float,
-    t_start_s: float = 0.0,
-) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult, jnp.ndarray]:
-    # Setup time integration
-    Q_SQ_MIN = 1e-10  # clipping to avoid negative TKE
-
-    @jax.jit
-    def _euler(y0: ProgVarsMYNN, **kwargs):
-        """Euler integration. y0 is model state, dydt0 are ODE tendencies"""
-        dydt0, diag0, mo_res0 = model(y0, **kwargs)
-        y1 = ProgVarsMYNN(
-            u=y0.u + dt_s * dydt0.u,
-            v=y0.v + dt_s * dydt0.v,
-            thv=y0.thv + dt_s * dydt0.thv,
-            q_sq=jnp.clip(y0.q_sq + dt_s * dydt0.q_sq, min=Q_SQ_MIN),
-        )
-        return y1, dydt0, diag0, mo_res0
-
-    @jax.jit
-    def _ab2(y1: ProgVarsMYNN, dydt0: ProgVarsMYNN, **kwargs):
-        """Two-step Adams-Bashforth integration. y1 is state (i-1), dydt0 are tendencies (i-2)."""
-        dydt1, diag1, mo_res1 = model(y1, **kwargs)
-        y2 = ProgVarsMYNN(
-            u=y1.u + (3 / 2) * dt_s * dydt1.u - (1 / 2) * dt_s * dydt0.u,
-            v=y1.v + (3 / 2) * dt_s * dydt1.v - (1 / 2) * dt_s * dydt0.v,
-            thv=y1.thv + (3 / 2) * dt_s * dydt1.thv - (1 / 2) * dt_s * dydt0.thv,
-            q_sq=jnp.clip(y1.q_sq + (3 / 2) * dt_s * dydt1.q_sq - (1 / 2) * dt_s * dydt0.q_sq, min=Q_SQ_MIN),
-        )
-        return y2, dydt1, diag1, mo_res1
-
-    # Setup timestep arrays
-    # Inner steps shifted by dt because initial Euler step is taken outside loop
-    t_outer = jnp.arange(t_start_s, t_end_s, dt_out_s)
-    rel_t_inner = jnp.arange(0, dt_out_s, dt_s) + dt_s  # relative to outer step
-    print(
-        f"Inner steps: {len(rel_t_inner)}, "
-        f"Outer steps: {len(t_outer)}, "
-        f"Total steps: {len(t_outer) * len(rel_t_inner)}"
-    )
-    timer = IterationTimer(n_total=len(t_outer))
-
-    # Create forcing evaluation function
-    get_forcing = forcing.get_eval_fn()
-
-    @jax.jit
-    def _scan_inner(carry, t):
-        """Advance model by one step but don't accumulate outputs"""
-        y1, dydt0, _, _ = carry
-        y2, dydt1, diag1, mo_res1 = _ab2(y1, dydt0, forcing=get_forcing(t))
-        return (y2, dydt1, diag1, mo_res1), None
-
-    @jax.jit
-    def _scan_outer(carry, t):
-        """Advance model by inner steps and accumulate outputs"""
-        carry_new, _ = jax.lax.scan(_scan_inner, init=carry, xs=t + rel_t_inner)
-        jax.debug.callback(timer.callback, t + dt_out_s)
-        return carry_new, carry_new
-
-    jax.debug.print("Begin simulation...")
-    y0 = ic
-    y1, dydt0, diag0, mo_res0 = _euler(y0, forcing=get_forcing(t_outer[0]))  # Warmup: one Euler step
-    _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, dydt0, diag0, mo_res0), xs=t_outer)
-    timer.finalize()
-    return y_hist, diag_hist, mo_hist, t_outer
-
-
-def simulate_adaptive_dt(
-    model: ModelFn,
-    grid: StaggeredGrid,
-    ic: ProgVarsMYNN,
-    forcing: TransientForcing,
-    cfl_max: float,
-    dt_s_init: float,
-    t_end_s: float,
-    dt_out_s: float,
-    t_start_s: float = 0.0,
-) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult, jnp.ndarray]:
-    # Setup time integration
-    Q_SQ_MIN = 1e-10  # clipping to avoid negative TKE
-
-    @jax.jit
-    def _euler(dt_s: float, y0: ProgVarsMYNN, **kwargs):
-        """Euler integration. y0 is model state, dydt0 are ODE tendencies"""
-        dydt0, diag0, mo_res0 = model(y0, **kwargs)
-        y1 = ProgVarsMYNN(
-            u=y0.u + dt_s * dydt0.u,
-            v=y0.v + dt_s * dydt0.v,
-            thv=y0.thv + dt_s * dydt0.thv,
-            q_sq=jnp.clip(y0.q_sq + dt_s * dydt0.q_sq, min=Q_SQ_MIN),
-        )
-        return y1, dydt0, diag0, mo_res0
-
-    @jax.jit
-    def _ab2(dt_s: float, y1: ProgVarsMYNN, dydt0: ProgVarsMYNN, **kwargs):
-        """Two-step Adams-Bashforth integration. y1 is state (i-1), dydt0 are tendencies (i-2)."""
-        dydt1, diag1, mo_res1 = model(y1, **kwargs)
-        y2 = ProgVarsMYNN(
-            u=y1.u + (3 / 2) * dt_s * dydt1.u - (1 / 2) * dt_s * dydt0.u,
-            v=y1.v + (3 / 2) * dt_s * dydt1.v - (1 / 2) * dt_s * dydt0.v,
-            thv=y1.thv + (3 / 2) * dt_s * dydt1.thv - (1 / 2) * dt_s * dydt0.thv,
-            q_sq=jnp.clip(y1.q_sq + (3 / 2) * dt_s * dydt1.q_sq - (1 / 2) * dt_s * dydt0.q_sq, min=Q_SQ_MIN),
-        )
-        return y2, dydt1, diag1, mo_res1
-
-    # Setup outer loop and timer
-    t_outer = jnp.arange(t_start_s, t_end_s, dt_out_s)
-    timer = IterationTimer(n_total=len(t_outer))
-
-    # Create forcing evaluation function
-    get_forcing = forcing.get_eval_fn()
-
-    @jax.jit
-    def _get_dt(Km: jnp.ndarray, Kh: jnp.ndarray) -> jnp.ndarray:
-        """Compute adaptive timestep based on CFL condition for diffusion."""
-        Km_max = jnp.max(Km)
-        Kh_max = jnp.max(Kh)
-        K_max = jnp.clip(jnp.maximum(Km_max, Kh_max), min=1e-6)  # avoid zero division
-        dt = cfl_max * grid.dz**2 / K_max
-
-        return dt
-
-    @jax.jit
-    def _while_body(carry):
-        """Advance model by one adaptive step"""
-        # Unpack previous state
-        y1, dydt0, diag0, _, i, t, t_left = carry
-
-        # Compute adaptive timestep. Make sure we always finish for dt_out_s.
-        dt_s = jnp.minimum(_get_dt(Km=diag0.Km, Kh=diag0.Kh), t_left)
-
-        # Integrate one step
-        y2, dydt1, diag1, mo_res1 = _ab2(dt_s, y1, dydt0, forcing=get_forcing(t))
-
-        # Advance time
-        t_left = t_left - dt_s
-        t = t + dt_s
-        i = i + 1
-
-        return y2, dydt1, diag1, mo_res1, i, t, t_left
-
-    @jax.jit
-    def _while_cond(carry):
-        """Condition for adaptive stepping loop"""
-        *_, t_left = carry
-        return t_left > 0
-
-    @jax.jit
-    def _scan_outer(carry, t):
-        """Advance model by inner steps and accumulate outputs"""
-        carry = (*carry, 0, t.astype(float), dt_out_s)  # Expand carry for while loop
-        carry_new = jax.lax.while_loop(_while_cond, _while_body, carry)
-        *carry_new, i, _, _ = carry_new  # unpack carry
-        jax.debug.callback(timer.callback, t + dt_out_s)
-        jax.debug.print("Took {i} steps with average dt={dt_s:.4f}s", i=i, dt_s=dt_out_s / i)
-        return tuple(carry_new), tuple(carry_new)
-
-    jax.debug.print("Begin simulation...")
-    y0 = ic
-    y1, dydt0, diag0, mo_res0 = _euler(dt_s_init, y0, forcing=get_forcing(t_outer[0]))  # Warmup: one Euler step
-    _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, dydt0, diag0, mo_res0), xs=t_outer)
-    timer.finalize()
-    return y_hist, diag_hist, mo_hist, t_outer
 
 
 def plot_state(state: ProgVarsMYNN, grid: StaggeredGrid):
@@ -470,17 +237,17 @@ if __name__ == "__main__":
 
     # YSU test case
     # t_debug = 0
-    # grid, init, forcing = cases.get_ysu(debug_dt=t_debug)
+    # grid, init, forcing = cases.get_ysu()
 
     # GABLS
-    # grid, init, forcing = cases.get_gabls1(Nz=64)
+    sim = cases.get_gabls1(Nz=64)
 
     # Wangara
-    grid, init, forcing = cases.get_wangara(Nz=1000)
+    # sim = cases.get_wangara(Nz=100)
 
     # Init and run model
     sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs())
-    model = init_model(grid, sfc, prescribe_sfc_heat="th_s" if forcing.w_th_s is None else "w_th_s")
+    model = init_model(sim.grid, sfc, prescribe_sfc_heat="th_s" if sim.forcing.w_th_s is None else "w_th_s")
     # state_hist, diag_hist, mo_hist, t = simulate(
     #     model,
     #     init,
@@ -492,19 +259,15 @@ if __name__ == "__main__":
     # )
     state_hist, diag_hist, mo_hist, t = simulate_adaptive_dt(
         model=model,
-        grid=grid,
-        forcing=forcing,
-        ic=init,
+        sim=sim,
         dt_s_init=0.001,
+        dt_s_max=0.1,
         cfl_max=0.1,
-        t_start_s=9 * 60 * 60,
-        t_end_s=16 * 60 * 60,
-        dt_out_s=60 * 5,
-        # dt_out_s=2,
+        dt_s_out=60 * 5,
     )
 
     # Save output
-    ds = make_dataset(state_hist, diag_hist, mo_hist, time=t / 3600, grid=grid)
+    ds = make_dataset(state_hist, diag_hist, mo_hist, time=t / 3600, grid=sim.grid)
     ds.to_netcdf("out.nc")
     print("Written to disk.")
 

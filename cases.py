@@ -6,13 +6,11 @@ import matplotlib.pyplot as plt
 
 from scm import consts
 from scm.grid import StaggeredGrid
-from scm.interfaces import ProgVars, TransientForcing
+from scm.interfaces import TransientForcing, Simulation
 from scm.closures.mynn import ProgVarsMYNN
 
 
-def get_gabls1(
-    Nz: int = 128, plot: bool = False, random_seed: int = 0
-) -> Tuple[StaggeredGrid, ProgVarsMYNN, TransientForcing]:
+def get_gabls1(Nz: int = 128, plot: bool = False, random_seed: int = 0) -> Simulation:
     ## Grid
     grid = StaggeredGrid(H=400, Nz=Nz)
     z_inv = 100
@@ -94,12 +92,10 @@ def get_gabls1(
 
         fig.show()
 
-    return grid, init, forcing
+    return Simulation(name="GABLS1", grid=grid, init=init, forcing=forcing, t_start_s=0, t_end_s=9 * 60 * 60)
 
 
-def get_ysu(
-    Nz: int = 138, plot: bool = False, debug_dt: float = 0
-) -> Tuple[StaggeredGrid, ProgVarsMYNN, TransientForcing]:
+def get_ysu(Nz: int = 138, plot: bool = False) -> Simulation:
     """Initial conditions and forcing from HND06
 
     Use debug_dt to shift the time of the forcing functions for debugging purposes.
@@ -135,7 +131,7 @@ def get_ysu(
     @jax.jit
     def _shfx(t_s: jnp.ndarray) -> jnp.ndarray:
         """Surface heat flux as function of time in seconds after simulation begin."""
-        t_h = (t_s + debug_dt) / 3600.0  # time in hours
+        t_h = t_s / 3600.0  # time in hours
         shfx = jnp.sin((t_h + 2) * jnp.pi / 12) * 400  # W/m2 = J/(s m2)
         shfx = shfx / (consts.rho_0 * consts.cp)  # convert to (K m/s)
         return shfx
@@ -143,7 +139,7 @@ def get_ysu(
     @jax.jit
     def _lhfx(t_s: jnp.ndarray) -> jnp.ndarray:
         """Surface latent heat flux as function of time in seconds after simulation begin."""
-        t_h = (t_s + debug_dt) / 3600.0  # time in hours
+        t_h = t_s / 3600.0  # time in hours
         lhfx = jnp.sin(t_h * jnp.pi / 12) * 200  # W/m2
         lhfx = lhfx / 1225  # convert to (g/kg m/s)  # todo: correct like this?
         return lhfx
@@ -187,7 +183,7 @@ def get_ysu(
         ax_lhfx.set_ylabel("Surface Latent Heat Flux (W/m²)")
         fig.show()
 
-    return grid, init, forcing
+    return Simulation(name="YSU", grid=grid, init=init, forcing=forcing, t_start_s=0, t_end_s=12 * 3600)
 
 
 def get_ekman(Nz: int = 100, plot: bool = False):
@@ -229,7 +225,7 @@ def get_ekman(Nz: int = 100, plot: bool = False):
     return grid, init, forcing
 
 
-def get_wangara(Nz: int = 50, plot: bool = False) -> Tuple[StaggeredGrid, ProgVarsMYNN, TransientForcing]:
+def get_wangara(Nz: int = 50, plot: bool = False) -> Simulation:
     """Wangara initial conditions and forcing."""
     import pandas as pd
 
@@ -292,7 +288,14 @@ def get_wangara(Nz: int = 50, plot: bool = False) -> Tuple[StaggeredGrid, ProgVa
         ax_lhfx.set_ylabel("Surface Latent Heat Flux (m/s)")
         fig.show()
 
-    return grid, init, forcing
+    return Simulation(
+        name="Wangara",
+        grid=grid,
+        init=init,
+        forcing=forcing,
+        t_start_s=9 * 3600,
+        t_end_s=16 * 3600,
+    )
 
 
 if __name__ == "__main__":
