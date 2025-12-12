@@ -6,6 +6,7 @@ import logging
 from typing import Tuple, List, Literal, TypeVar
 
 import jax
+import jax.experimental.checkify
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
@@ -266,6 +267,104 @@ def simulate(
     return y_hist, diag_hist, mo_hist, t_outer
 
 
+def simulate_adaptive_dt(
+    model: ModelFn,
+    grid: StaggeredGrid,
+    ic: ProgVarsMYNN,
+    forcing: TransientForcing,
+    cfl_max: float,
+    dt_s_init: float,
+    t_end_s: float,
+    dt_out_s: float,
+    t_start_s: float = 0.0,
+) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult, jnp.ndarray]:
+    # Setup time integration
+    Q_SQ_MIN = 1e-10  # clipping to avoid negative TKE
+
+    @jax.jit
+    def _euler(dt_s: float, y0: ProgVarsMYNN, **kwargs):
+        """Euler integration. y0 is model state, dydt0 are ODE tendencies"""
+        dydt0, diag0, mo_res0 = model(y0, **kwargs)
+        y1 = ProgVarsMYNN(
+            u=y0.u + dt_s * dydt0.u,
+            v=y0.v + dt_s * dydt0.v,
+            thv=y0.thv + dt_s * dydt0.thv,
+            q_sq=jnp.clip(y0.q_sq + dt_s * dydt0.q_sq, min=Q_SQ_MIN),
+        )
+        return y1, dydt0, diag0, mo_res0
+
+    @jax.jit
+    def _ab2(dt_s: float, y1: ProgVarsMYNN, dydt0: ProgVarsMYNN, **kwargs):
+        """Two-step Adams-Bashforth integration. y1 is state (i-1), dydt0 are tendencies (i-2)."""
+        dydt1, diag1, mo_res1 = model(y1, **kwargs)
+        y2 = ProgVarsMYNN(
+            u=y1.u + (3 / 2) * dt_s * dydt1.u - (1 / 2) * dt_s * dydt0.u,
+            v=y1.v + (3 / 2) * dt_s * dydt1.v - (1 / 2) * dt_s * dydt0.v,
+            thv=y1.thv + (3 / 2) * dt_s * dydt1.thv - (1 / 2) * dt_s * dydt0.thv,
+            q_sq=jnp.clip(y1.q_sq + (3 / 2) * dt_s * dydt1.q_sq - (1 / 2) * dt_s * dydt0.q_sq, min=Q_SQ_MIN),
+        )
+        return y2, dydt1, diag1, mo_res1
+
+    # Setup outer loop and timer
+    t_outer = jnp.arange(t_start_s, t_end_s, dt_out_s)
+    timer = IterationTimer(n_total=len(t_outer))
+
+    # Create forcing evaluation function
+    get_forcing = forcing.get_eval_fn()
+
+    @jax.jit
+    def _get_dt(Km: jnp.ndarray, Kh: jnp.ndarray) -> jnp.ndarray:
+        """Compute adaptive timestep based on CFL condition for diffusion."""
+        Km_max = jnp.max(Km)
+        Kh_max = jnp.max(Kh)
+        K_max = jnp.clip(jnp.maximum(Km_max, Kh_max), min=1e-6)  # avoid zero division
+        dt = cfl_max * grid.dz**2 / K_max
+
+        return dt
+
+    @jax.jit
+    def _while_body(carry):
+        """Advance model by one adaptive step"""
+        # Unpack previous state
+        y1, dydt0, diag0, _, i, t, t_left = carry
+
+        # Compute adaptive timestep. Make sure we always finish for dt_out_s.
+        dt_s = jnp.minimum(_get_dt(Km=diag0.Km, Kh=diag0.Kh), t_left)
+
+        # Integrate one step
+        y2, dydt1, diag1, mo_res1 = _ab2(dt_s, y1, dydt0, forcing=get_forcing(t))
+
+        # Advance time
+        t_left = t_left - dt_s
+        t = t + dt_s
+        i = i + 1
+
+        return y2, dydt1, diag1, mo_res1, i, t, t_left
+
+    @jax.jit
+    def _while_cond(carry):
+        """Condition for adaptive stepping loop"""
+        *_, t_left = carry
+        return t_left > 0
+
+    @jax.jit
+    def _scan_outer(carry, t):
+        """Advance model by inner steps and accumulate outputs"""
+        carry = (*carry, 0, t.astype(float), dt_out_s)  # Expand carry for while loop
+        carry_new = jax.lax.while_loop(_while_cond, _while_body, carry)
+        *carry_new, i, _, _ = carry_new  # unpack carry
+        jax.debug.callback(timer.callback, t + dt_out_s)
+        jax.debug.print("Took {i} steps with average dt={dt_s:.4f}s", i=i, dt_s=dt_out_s / i)
+        return tuple(carry_new), tuple(carry_new)
+
+    jax.debug.print("Begin simulation...")
+    y0 = ic
+    y1, dydt0, diag0, mo_res0 = _euler(dt_s_init, y0, forcing=get_forcing(t_outer[0]))  # Warmup: one Euler step
+    _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, dydt0, diag0, mo_res0), xs=t_outer)
+    timer.finalize()
+    return y_hist, diag_hist, mo_hist, t_outer
+
+
 def plot_state(state: ProgVarsMYNN, grid: StaggeredGrid):
     """Plot initial conditions."""
     fig, (ax_uv, ax_thv, ax_q_sq) = plt.subplots(ncols=3, figsize=(8, 3), constrained_layout=True)
@@ -377,19 +476,31 @@ if __name__ == "__main__":
     # grid, init, forcing = cases.get_gabls1(Nz=64)
 
     # Wangara
-    grid, init, forcing = cases.get_wangara(Nz=2000)
+    grid, init, forcing = cases.get_wangara(Nz=1000)
 
     # Init and run model
     sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs())
     model = init_model(grid, sfc, prescribe_sfc_heat="th_s" if forcing.w_th_s is None else "w_th_s")
-    state_hist, diag_hist, mo_hist, t = simulate(
-        model,
-        init,
-        forcing,
-        dt_s=0.001,
+    # state_hist, diag_hist, mo_hist, t = simulate(
+    #     model,
+    #     init,
+    #     forcing,
+    #     dt_s=0.001,
+    #     t_start_s=9 * 60 * 60,
+    #     t_end_s=16 * 60 * 60,
+    #     dt_out_s=60 * 5,
+    # )
+    state_hist, diag_hist, mo_hist, t = simulate_adaptive_dt(
+        model=model,
+        grid=grid,
+        forcing=forcing,
+        ic=init,
+        dt_s_init=0.001,
+        cfl_max=0.1,
         t_start_s=9 * 60 * 60,
         t_end_s=16 * 60 * 60,
         dt_out_s=60 * 5,
+        # dt_out_s=2,
     )
 
     # Save output
