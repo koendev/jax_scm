@@ -30,25 +30,19 @@ T = TypeVar("T")
 
 def d_dz(a: jnp.ndarray, dz: float, bot: jnp.ndarray | float | str, top: jnp.ndarray | float | str) -> jnp.ndarray:
     """Compute vertical gradient of a at half levels using first-order finite differences."""
-    Nz = len(a)
-    da_dz = jnp.zeros(Nz + 1)  # half levels
-    da_dz = da_dz.at[1:-1].set((a[1:] - a[:-1]) / dz)
+    da_dz_inner = (a[1:] - a[:-1]) / dz
 
-    if isinstance(bot, str):
-        if bot == "edge":
-            bot = da_dz[1]
-        else:
-            raise ValueError(f"Unknown bot BC string: {bot}")
+    if bot == "edge":
+        bot_val = da_dz_inner[0]
+    else:
+        bot_val = bot
 
-    if isinstance(top, str):
-        if top == "edge":
-            top = da_dz[-2]
-        else:
-            raise ValueError(f"Unknown top BC string: {top}")
+    if top == "edge":
+        top_val = da_dz_inner[-1]
+    else:
+        top_val = top
 
-    da_dz = da_dz.at[0].set(bot)
-    da_dz = da_dz.at[-1].set(top)
-    return da_dz
+    return jnp.concatenate([jnp.atleast_1d(bot_val), da_dz_inner, jnp.atleast_1d(top_val)])
 
 
 def init_model(
@@ -119,17 +113,10 @@ def init_model(
 
         # Gather tendencies and updated diagnostics
         tends = ProgVarsMYNN(u=u_tend, v=v_tend, thv=thv_tends, q_sq=q_sq_tend)
-        diag = update_dc_obj(diag, u_w=u_w, v_w=v_w, thv_w=thv_w)
+        diag = dataclasses.replace(diag, u_w=u_w, v_w=v_w, thv_w=thv_w)
         return tends, diag, mo_res
 
     return _model
-
-
-def update_dc_obj(d: T, **updates) -> T:
-    """Update dataclass object with new values."""
-    d_dict = dataclasses.asdict(d)
-    d_dict.update(updates)
-    return d.__class__(**d_dict)
 
 
 def plot_state(state: ProgVarsMYNN, grid: StaggeredGrid):
