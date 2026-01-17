@@ -74,6 +74,7 @@ def init_mynn(grid: StaggeredGrid) -> MYNNClosureFn:
     C2, C3, C4, C5 = 0.75, 0.352, 0.0, 0.2  # eq 66, NN09
     gamma1 = 0.235  # below A4, NN09
     q_sq_min = 1e-10  # minimum TKE to avoid div by zero  # todo: check wrf implementation
+    g_m_min = 1e-12
 
     def _closure(state: ProgVarsMYNN, grads: ProgVarsMYNN, mo_res: MOResult) -> DiagVarsMYNN:
         # in MYNN, q_sq is 2*TKE not specific humidity!
@@ -95,7 +96,7 @@ def init_mynn(grid: StaggeredGrid) -> MYNNClosureFn:
         zeta = grid.zh / mo_res.L
         L_S = jnp.where(
             zeta < 0,
-            consts.kappa * grid.zh * (1 - 100 * zeta) ** 0.2,
+            consts.kappa * grid.zh * jnp.clip(1 - 100 * zeta, a_min=0.0) ** 0.2,
             jnp.where(
                 zeta < 1,
                 consts.kappa * grid.zh * (1 + 2.7 * zeta) ** (-1),  # 0 <= zeta < 1
@@ -107,8 +108,8 @@ def init_mynn(grid: StaggeredGrid) -> MYNNClosureFn:
         L_T = 0.23 * jnp.trapezoid(q * grid.zh, grid.zh) / jnp.trapezoid(q, grid.zh)  # todo: maybe better on non-interp
 
         # Buoyance length scale (eq 55, NN09)
-        N = jnp.sqrt(consts.g / th_0 * grads.thv)  # todo: produces NaN for negative grads.thv. Caught below but fix
-        q_c = ((consts.g / th_0) * w_thv_0 * L_T) ** (1 / 3)  # in line after eq 55, NN09
+        N = jnp.sqrt(jnp.clip(consts.g / th_0 * grads.thv, a_min=0.0))
+        q_c = jnp.clip((consts.g / th_0) * w_thv_0 * L_T, a_min=0.0) ** (1 / 3)  # in line after eq 55, NN09
         L_B = jnp.where(
             grads.thv <= 0,
             jnp.inf,
@@ -126,7 +127,7 @@ def init_mynn(grid: StaggeredGrid) -> MYNNClosureFn:
         G_M = L**2 / q**2 * (grads.u**2 + grads.v**2)  # eq 39, NN09
         # G_H = -(L**2) / q**2 * consts.g / th_0 * (beta_th * grads.th_l + beta_q * grads.q_w)  # eq 40, NN09
         G_H = -(L**2) / q**2 * consts.g / th_0 * grads.thv  # eq 40, NN09 (virt. pot. temp. version)
-        Ri = -G_H / G_M  # above eq A11, NN09, gradient Richardson number
+        Ri = -G_H / (G_M + g_m_min)  # above eq A11, NN09, gradient Richardson number
 
         ## Level-2 closure
         gamma2 = (2 * A1 * (3 - 2 * C2) + B2 * (1 - C3)) / B1  # eq A5, NN09
@@ -141,7 +142,7 @@ def init_mynn(grid: StaggeredGrid) -> MYNNClosureFn:
         Ri1 = 0.5 * A2 * F2 / (A1 * F1)
         Ri2 = 0.5 * Rf1 / Ri1
         Ri3 = (2 * Rf2 - Rf1) / Ri1
-        Rf = Ri1 * (Ri + Ri2 - (Ri**2 - Ri3 * Ri + Ri2**2) ** (1 / 2))  # eq A11, NN09
+        Rf = Ri1 * (Ri + Ri2 - (jnp.clip(Ri**2 - Ri3 * Ri + Ri2**2, a_min=0.0)) ** (1 / 2))  # eq A11, NN09
 
         # Level-2 stability functions
         SH2 = 3 * A2 * (gamma1 + gamma2) * (Rfc - Rf) / (1 - Rf)  # eq A4, NN09
@@ -149,7 +150,7 @@ def init_mynn(grid: StaggeredGrid) -> MYNNClosureFn:
 
         # Diagnosed level-2 tke
         q2_sq = B1 * L**2 * SM2 * (1 - Rf) * (grads.u**2 + grads.v**2)  # eq A2, NN09
-        q2 = jnp.sqrt(q2_sq)
+        q2 = jnp.sqrt(jnp.clip(q2_sq, a_min=0.0))
 
         ## Level-2.5 closure
         alpha_c = jnp.where(q < q2, q / q2, 1.0)  # eq 42, NN09
@@ -206,7 +207,11 @@ def init_mynn(grid: StaggeredGrid) -> MYNNClosureFn:
         eps = state.q_sq ** (3 / 2) / (B1 * L_full)  # dissipation, eq. 12, NN09
 
         # Ct2
-        ct2 = 3.2 * B1 ** (1 / 3) / B2 * L ** (-2 / 3) * th_th
+        # ct2 = 3.2 * B1 ** (1 / 3) / B2 * L ** (-2 / 3) * th_th
+        # todo: check simplification
+        # Simplified to avoid NaN from 0 * inf when L=0, since th_th is proportional to L.
+        # th_th = -lam2 / q * th_w * dth_dz, where lam2 = B2 * L
+        ct2 = -3.2 * B1 ** (1 / 3) * jnp.clip(L, a_min=0.0) ** (1 / 3) / q * th_w * dth_dz
 
         return DiagVarsMYNN(
             u_w=u_w,

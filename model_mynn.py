@@ -20,7 +20,7 @@ from scm.utils import make_dataset
 # jax.config.update("jax_disable_jit", True)
 jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax_platforms", "cpu")
-# jax.config.update("jax_debug_nans", True)
+jax.config.update("jax_debug_nans", True)
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("scm")
@@ -240,10 +240,10 @@ if __name__ == "__main__":
     # grid, init, forcing = cases.get_ysu()
 
     # GABLS
-    sim = cases.get_gabls1(Nz=64)
+    # sim = cases.get_gabls1(Nz=64)
 
     # Wangara
-    # sim = cases.get_wangara(Nz=100)
+    sim = cases.get_wangara(Nz=200)
 
     # Init and run model
     sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs())
