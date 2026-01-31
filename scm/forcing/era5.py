@@ -103,6 +103,7 @@ def get_era5_sim(
         forcing=frc,
         t_start_s=int(t_start_s),
         t_end_s=int(t_end_s),
+        t_index=ds_era5.indexes["valid_time"],
     )
 
     return sim

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 
+import pandas as pd
 import xarray as xr
 from jax import numpy as jnp
 
@@ -14,7 +15,7 @@ def make_dataset(
     state_hist: ProgVarsT,
     diag_hist: DiagVarsT,
     mo_hist: MOResult,
-    time: jnp.ndarray,
+    time: jnp.ndarray | pd.DatetimeIndex,
     grid: StaggeredGrid,
 ) -> xr.Dataset:
     """Convert history to xarray Dataset."""

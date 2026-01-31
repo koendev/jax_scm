@@ -9,6 +9,7 @@ from typing import Protocol, Tuple, TypeVar, Callable, Generic
 
 import jax.numpy as jnp
 import jax.tree_util
+import pandas as pd
 
 from scm.grid import StaggeredGrid
 from scm.mo import MOResult
@@ -30,6 +31,7 @@ class Simulation(Generic[ProgVarsT]):
     forcing: TransientForcing
     t_start_s: int
     t_end_s: int
+    t_index: pd.DatetimeIndex | None = None  # Optional time index for output
 
 
 @jax.tree_util.register_dataclass

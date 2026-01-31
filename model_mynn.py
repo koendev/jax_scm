@@ -7,17 +7,17 @@ from typing import Tuple, Literal, TypeVar
 import jax
 import jax.experimental.checkify
 import jax.numpy as jnp
+import numpy as np
 
-import cases
 from scm.closures.mynn import init_mynn, ProgVarsMYNN, DiagVarsMYNN
+from scm.forcing.era5 import get_era5_sim
+from scm.forcing.interp import interp_dtindex
 from scm.grad import d_dz
 from scm.grid import StaggeredGrid
-from scm.interfaces import ModelFn
-from scm.interfaces import StaticForcing
+from scm.interfaces import ModelFn, StaticForcing
+from scm.io.local import make_dataset
 from scm.mo import init_mo_sfc, MOResult, BusingerDyerSimFuncs, SurfaceProperties
 from scm.time_stepping import simulate_adaptive_dt
-from scm.utils import make_dataset
-from scm.forcing.era5 import get_era5_sim
 
 # jax.config.update("jax_disable_jit", True)
 jax.config.update("jax_enable_x64", True)
@@ -139,6 +139,7 @@ if __name__ == "__main__":
         lat_deg=52.0,
         lon_deg=5.0,
         grid=StaggeredGrid(Nz=100, H=3000.0),
+        # time_slice=slice("2025-07-01", "2025-07-03"),
         time_slice="2025-07-01",
     )
 
@@ -163,8 +164,14 @@ if __name__ == "__main__":
         dt_s_out=60 * 5,
     )
 
+    # Prepare time axis
+    if sim.t_index is not None:
+        time = interp_dtindex(t_s=np.array(t), idx=sim.t_index)
+    else:
+        time = t / 3600.0  # convert to hours
+
     # Save output
-    ds = make_dataset(state_hist, diag_hist, mo_hist, time=t / 3600, grid=sim.grid)
+    ds = make_dataset(state_hist, diag_hist, mo_hist, time=time, grid=sim.grid)
     ds.to_netcdf("out.nc")
     print("Written to disk.")
 

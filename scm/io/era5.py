@@ -11,6 +11,8 @@ def download_data(lat_deg: float, lon_deg: float, time_slice: slice | str) -> xr
     """Download ERA5 data for given lat/lon and time range.
     Attention: Pycharm debugger doesn't work here because of async zarr and xarray.
     """
+    print("Downloading ERA5 data... This may take a while.")
+
     # Variables to download from ERA5
     VARS_PL = ["z", "u", "v", "q", "t"]
     VARS_SL = ["skt"]
@@ -52,6 +54,10 @@ def download_data(lat_deg: float, lon_deg: float, time_slice: slice | str) -> xr
     logger.info(f"Size on disk: {ds.nbytes / 1e6:.1f} MB")
     logger.info(ds.sizes)
     logger.info(list(ds.data_vars))
+
+    # Load into memory
+    ds = ds.load()
+    print("Download complete.")
 
     return ds
 

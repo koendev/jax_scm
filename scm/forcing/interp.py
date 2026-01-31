@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+import pandas as pd
 import jax
 import numpy as np
 import xarray as xr
@@ -33,6 +34,15 @@ def get_ts_interp_fn(time_s: jnp.ndarray, data: jnp.ndarray) -> Callable[[jnp.nd
         return interp_2d_fn
     else:
         raise ValueError("data must be 1D or 2D")
+
+
+def interp_dtindex(t_s: np.ndarray, idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    """Interpolate a DatetimeIndex to new timestamps."""
+    t_ns = (t_s * 1e9).astype(np.int64)
+    idx_ns = idx.astype("datetime64[ns]").astype(np.int64)
+    idx_ns_interp = np.interp(t_ns, idx_ns - idx_ns[0], idx_ns)
+    idx_interp = pd.to_datetime(idx_ns_interp, unit="ns")
+    return idx_interp
 
 
 def xr_interp_vert(ds: xr.Dataset, z: xr.DataArray, z_target: xr.DataArray, dim: str) -> xr.Dataset:
