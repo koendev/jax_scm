@@ -20,11 +20,17 @@ class XRCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def get_hash(*args, **kwargs) -> str:
-        """Generate a hash string from function arguments."""
+    def get_hash(fn: Callable, *args, **kwargs) -> str:
+        """Generate a hash string from function arguments and function itself."""
+
+        # Hash func code
+        # This is based on https://github.com/joblib/joblib/blob/main/joblib/memory.py#L655
+        # fn_code_h = hash(getattr(fn, "__code__", None))
+        # fn_hash = (id(fn), hash(fn), fn_code_h)
 
         hasher = hashlib.md5()
-        hasher.update(pickle.dumps((args, frozenset(kwargs.items()))))
+        hasher.update(pickle.dumps((args, frozenset(kwargs.items()))))  # hash arguments
+        # hasher.update(pickle.dumps(fn_hash))  # hash function code
         return hasher.hexdigest()
 
     def cache(self, fn: Callable[..., xr.Dataset]) -> Callable[..., xr.Dataset]:
@@ -33,7 +39,7 @@ class XRCache:
         @wraps(fn)
         def wrapper(*args, **kwargs) -> xr.Dataset:
             # Compute hash from arguments and use it as cache file path
-            input_hash = self.get_hash(*args, **kwargs)
+            input_hash = self.get_hash(fn, *args, **kwargs)
             cache_file = self.cache_dir / f"{fn.__name__}_{input_hash}.nc"
 
             if cache_file.exists():
