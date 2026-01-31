@@ -9,6 +9,7 @@ import jax
 import jax.numpy as jnp
 
 from scm import consts
+from scm import conversions as conv
 
 logger = logging.getLogger("scm.mo")
 SimFuncType = Callable[[jnp.ndarray], jnp.ndarray]
@@ -34,14 +35,11 @@ class MOResult:
 
     u_st: jnp.ndarray  # Friction velocity at the surface
     w_th: jnp.ndarray  # Sensible heat flux at the surface
+    w_thv: jnp.ndarray  # Buoyancy flux at the surface
     w_q: jnp.ndarray  # Moisture flux at the surface
     L: jnp.ndarray  # Obukhov length
     zeta: jnp.ndarray  # Stability parameter (z/L)
     zeta_err: jnp.ndarray  # Relative error in zeta convergence
-    # du_dz: jnp.ndarray  # Vertical gradient of u component
-    # dv_dz: jnp.ndarray  # Vertical gradient of v component
-    # dth_dz: jnp.ndarray  # Vertical gradient of theta
-    # dq_dz: jnp.ndarray  # Vertical gradient of specific humidity
     m10: jnp.ndarray  # 10m wind speed following MOST
     th2: jnp.ndarray  # 2m temperature following MOST
     th_s: jnp.ndarray  # Surface temperature
@@ -56,7 +54,8 @@ class MOFunc(Protocol):
         u_0: jnp.ndarray | float,
         v_0: jnp.ndarray | float,
         th_0: jnp.ndarray | float,
-        w_q_s: jnp.ndarray | float,
+        qv_0: jnp.ndarray | float,
+        w_qv_s: jnp.ndarray | float,
         w_th_s: jnp.ndarray | float | None = None,
         th_s: jnp.ndarray | float | None = None,
     ) -> MOResult: ...
@@ -145,12 +144,12 @@ class BusingerDyerSimFuncs(MOSimilarityFuncs):
 
 
 @jax.jit
-def get_L_obukhov(u_st: jnp.ndarray, w_th: jnp.ndarray, th: jnp.ndarray) -> jnp.ndarray:
-    """Compute Obukhov length based on friction velocity and surface fluxes.
+def get_L_obukhov(u_st: jnp.ndarray, w_thv: jnp.ndarray, thv: jnp.ndarray) -> jnp.ndarray:
+    """Compute Obukhov length based on friction velocity and BOUYANCY flux.
     For numerical stability, clip L to a reasonable range.
     """
     # Handle neutral case where w_th is zero
-    L = jnp.where(w_th == 0, jnp.inf, -(th * u_st**3) / (consts.kappa * consts.g * w_th))
+    L = jnp.where(w_thv == 0, jnp.inf, -(thv * u_st**3) / (consts.kappa * consts.g * w_thv))
     return L
 
 
@@ -185,8 +184,6 @@ def init_mo_sfc(
     -------
     Callable
         A function that computes surface fluxes based on Monin-Obukhov similarity theory.
-        The function signature is:
-        `eval_mo(u_0: float, v_0: float, th_0: float, w_th_s: float | None = None, th_s: float | None = None) -> MOResult`
     """
     # Set up similarity functions
     phi_m_fn, phi_h_fn, psi_m_fn, psi_h_fn = sim_funcs.get_all_fns()
@@ -194,8 +191,26 @@ def init_mo_sfc(
     @jax.jit
     def _eval_most(zeta, m_0, th_0, w_th, th_s):
         """Compute u_star and surface heatflux or surface temperature depending on what is prescribed.
-        - if "th_s" is prescribed, `w_th` input gets ignored.
-        - if "w_th" is prescribed, `th_z` input gets ignored.
+
+        Parameters
+        ----------
+        zeta: jnp.ndarray
+            Stability parameter (z/L)
+        m_0: jnp.ndarray
+            Wind speed at height z, m/s
+        th_0: jnp.ndarray
+            DRY (!) potential temperature at height z, K
+        w_th: jnp.ndarray
+            Sensible heat flux at the surface, K m/s
+            Input gets ignored if "th_s" is prescribed.
+        th_s: jnp.ndarray
+            Surface temperature, K  # todo: this is assumed as pot. temp. Correct?
+            Input gets ignored if "w_th" is prescribed.
+
+        Note
+        ----
+        Sensible heat flux is needs to be computed from DRY potential temp.
+        Buoyancy flux is estimated later/outside this function. Therefore, no moisture flux needed here.
         """
         # Evaluate similarity functions
         psi_m = psi_m_fn(zeta)
@@ -220,15 +235,20 @@ def init_mo_sfc(
         return u_st, w_th, th_s
 
     @jax.jit
-    def _get_zeta_fixed_iter(m_0, th_0, w_th, th_s) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def _get_zeta_fixed_iter(m_0, th_0, thv_0, w_th, th_s, w_qv) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Get zeta using fixed number of iterations."""
         # zeta = jnp.where(w_th != 0.0, -jnp.sign(w_th) * 10.0, 0.0)
         zeta = 0
         zeta_err = jnp.nan
 
         for i in range(n_iter):
+            # Evaluate with dry potential temperature and sensible heat flux
             u_st, w_th, th_s = _eval_most(zeta, m_0, th_0, w_th, th_s)
-            L = get_L_obukhov(u_st=u_st, w_th=w_th, th=th_0)
+
+            # Obukohov length uses buoyancy flux and virtual potential temperature
+            w_thv = conv.w_th_to_w_thv(th=th_0, w_th=w_th, w_qv=w_qv)
+            L = get_L_obukhov(u_st=u_st, w_thv=w_thv, thv=thv_0)
+
             zeta_new = jnp.clip(z / L, min=-10.0, max=20.0)  # update zeta
             zeta_err = jnp.abs(zeta_new - zeta) / jnp.maximum(jnp.abs(zeta), 1e-10)
             zeta = zeta_new
@@ -241,7 +261,8 @@ def init_mo_sfc(
         u_0: jnp.ndarray | float,
         v_0: jnp.ndarray | float,
         th_0: jnp.ndarray | float,
-        w_q_s: jnp.ndarray | float,
+        qv_0: jnp.ndarray | float,
+        w_qv_s: jnp.ndarray | float,
         w_th_s: jnp.ndarray | float | None = None,
         th_s: jnp.ndarray | float | None = None,
     ) -> MOResult:
@@ -250,15 +271,17 @@ def init_mo_sfc(
         Parameters
         ----------
         u_0: float
-            u velocity at lowest grid level, m/s
+            u velocity at height z, m/s
         v_0: float
-            v velocity at lowest grid level, m/s
+            v velocity at height z, m/s
         th_0: float
-            theta at lowest grid level, K
-        w_q_s: float
+            (DRY!) potential temperature at height z, K
+        qv_0: float
+            specific humidity at height z, kg/kg
+        w_qv_s: float
             prescribed moisture flux at the surface, (kg/kg) m/s
         w_th_s: float
-            prescribed sensible heat flux at the surface, K m/s
+            prescribed sensible heat flux (NOT buoyancy flux) at the surface, K m/s
             (ignored if `prescribe` not is set to "w_th_s")
         th_s: float
             prescribed surface temperature, K
@@ -270,30 +293,21 @@ def init_mo_sfc(
             Result of Monin-Obukhov similarity evaluation
         """
         m_0 = jnp.sqrt(u_0**2 + v_0**2)  # wind magnitude
+        thv_0 = conv.th_to_thv(th=th_0, qv=qv_0)  # virtual potential temperature
+
         w_th_s = w_th_s if prescribe == "w_th_s" else 0.0
         th_s = th_s if prescribe == "th_s" else 0.0
 
         # Solve for zeta given wind speed, temperature, and prescribed flux or surface temperature
-        zeta, zeta_err = _get_zeta_fixed_iter(m_0=m_0, th_0=th_0, w_th=w_th_s, th_s=th_s)
+        zeta, zeta_err = _get_zeta_fixed_iter(m_0=m_0, th_0=th_0, thv_0=thv_0, w_th=w_th_s, th_s=th_s, w_qv=w_qv_s)
 
         # Evaluate MOST with solved zeta
         u_st, w_th_s, th_s = _eval_most(zeta, m_0, th_0, w_th_s, th_s)
         th_st = -w_th_s / u_st
-        # q_st = -w_q_s / u_st
 
         # Compute stresses at surface. Defined as -uw = ust^2
         u_w_s = -(u_st**2) * u_0 / m_0
         v_w_s = -(u_st**2) * v_0 / m_0
-
-        # Compute gradients based on converged Obukhov length and fluxes
-        # Claude suggests to evaluate gradients halfway between surface and lowest full level
-        # dm_dz = phi_m_fn(zeta * z_grad / z) * u_st / (consts.kappa * z)
-        # dth_dz = phi_h_fn(zeta * z_grad / z) * th_st / (consts.kappa * z)
-        # dq_dz = phi_h_fn(zeta * z_grad / z) * q_st / (consts.kappa * z)
-
-        # Split into u and v
-        # du_dz = dm_dz * u_0 / m_0
-        # dv_dz = dm_dz * v_0 / m_0
 
         # Compute m10 and th2 as aux outputs
         m10 = u_st * (jnp.log(10 / z0m) - psi_m_fn(zeta * (10 / z)) + psi_m_fn(zeta * (z0m / z))) / consts.kappa
@@ -303,16 +317,13 @@ def init_mo_sfc(
         return MOResult(
             u_st=u_st,
             w_th=w_th_s,
-            w_q=w_q_s,
+            w_thv=conv.w_th_to_w_thv(th=th_0, w_th=w_th_s, w_qv=w_qv_s),
+            w_q=w_qv_s,
             L=L,
             zeta=zeta,
             zeta_err=zeta_err,
-            # du_dz=du_dz,
-            # dv_dz=dv_dz,
-            # dth_dz=dth_dz,
-            # dq_dz=dq_dz,
             m10=m10,
-            th2=th2,
+            th2=th2,  # dry potential temperature at 2m
             th_s=th_s,
             u_w=u_w_s,
             v_w=v_w_s,
