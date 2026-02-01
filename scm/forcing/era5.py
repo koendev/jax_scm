@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import xarray as xr
 
 from scm.forcing import convert
@@ -11,6 +12,7 @@ from scm.interfaces import Simulation, TransientForcing
 from scm.closures.mynn import ProgVarsMYNN
 from scm.io import era5
 from scm.io.cache import XRCache
+from scm import consts
 
 
 def get_era5_sim(
@@ -30,68 +32,72 @@ def get_era5_sim(
         download_data = era5.download_data
 
     # Download ERA5 data
-    ds_era5 = download_data(lat_deg, lon_deg, time_slice)
-    ds_era5 = ds_era5.rename_dims(isobaricInhPa="bottom_top")  # more telling coordinate names
+    ds = download_data(lat_deg, lon_deg, time_slice)
+    ds = ds.rename_dims(isobaricInhPa="bottom_top")  # more telling coordinate names
 
     # Compute geostrophic wind
-    ds_uv_geo = convert.uv_geo_from_z(lat_deg=ds_era5["latitude"], lon_deg=ds_era5["longitude"], z=ds_era5["z"])
-    ds_era5 = ds_era5.merge(ds_uv_geo)
+    ds_uv_geo = convert.uv_geo_from_z(lat_deg=ds["latitude"], lon_deg=ds["longitude"], z=ds["z"])
+    ds = ds.merge(ds_uv_geo, compat="override")
 
     # Compute potential temperature
-    p_hPa = ds_era5["isobaricInhPa"]
-    ds_era5["th"] = convert.th_from_tk(t_k=ds_era5["t"], p_hPa=p_hPa)
+    p_hPa = ds["isobaricInhPa"]
+    ds["th"] = convert.th_from_tk(t_k=ds["t"], p_hPa=p_hPa)
 
     # We don't need neighbours anymore
-    ds_era5 = ds_era5.sel(latitude=lat_deg, longitude=lon_deg)
+    ds = ds.sel(latitude=lat_deg, longitude=lon_deg, method="nearest")
 
     # Geopotential to height
-    z = ds_era5["z"] / 9.81  # in m
+    z = ds["z"] / 9.81  # in m
     z_target = xr.DataArray(grid.z, dims=["bottom_top"])
 
     # Interpolate ERA5 to grid levels
     # As ERA5 has very few levels near surface, we fill missing values with constants after interpolation
     # Disable jax nan checking temporarily because it will otherwise raise exception
     with jax.debug_nans(False):
-        ds_era5_grid = xr_interp_vert(ds_era5, z=z, z_target=z_target, dim="bottom_top")
-        ds_era5_grid = ds_era5_grid.interpolate_na(dim="bottom_top", method="nearest", fill_value="extrapolate")
+        # Interpolate on log(z)
+        ds_interp = xr_interp_vert(ds, z=np.log(z), z_target=np.log(z_target), dim="bottom_top")
+        ds_interp = ds_interp.interpolate_na(dim="bottom_top", method="nearest", fill_value="extrapolate")
 
     # Create time coordinate in s
-    t = ds_era5["valid_time"]
+    t = ds["valid_time"]
     t = t - t[0]
     t = t.astype("timedelta64[s]").astype(int)
     t_start_s, t_end_s = t[[0, -1]].values
 
     # Create forcing functions for geostrophic wind
-    u_geo_fn = get_ts_interp_fn(
-        time_s=jnp.array(t.values),
-        data=jnp.array(ds_era5_grid["ug"].values),
-    )
-    v_geo_fn = get_ts_interp_fn(
-        time_s=jnp.array(t.values),
-        data=jnp.array(ds_era5_grid["vg"].values),
-    )
+    u_geo_fn = get_ts_interp_fn(time_s=jnp.array(t.values), data=jnp.array(ds_interp["ug"].values))
+    v_geo_fn = get_ts_interp_fn(time_s=jnp.array(t.values), data=jnp.array(ds_interp["vg"].values))
 
     # Create surface temperature forcing function
     t_s_fn = get_ts_interp_fn(
         time_s=jnp.array(t.values),
-        data=jnp.array(ds_era5["skt"].values),  # todo: convert to pot temp?
+        data=jnp.array(ds["skt"].values),  # todo: convert to pot temp?
     )
+
+    # Create moisture flux forcing
+    rho = ds["sp"] / (consts.Rd * ds["skt"])  # todo: acc to Gemini, virtual skin temp should be used
+    w_qv = -ds["ie"] / rho
+    w_qv_s_fn = get_ts_interp_fn(time_s=jnp.array(t.values), data=jnp.array(w_qv.values))
+
+    # Coriolis parameter
+    f_c = 2 * 7.2921e-5 * jnp.sin(jnp.deg2rad(lat_deg))
 
     # Gather forcing in TransientForcing
     frc = TransientForcing(
         u_geo=u_geo_fn,
         v_geo=v_geo_fn,
         th_s=t_s_fn,
-        w_qv_s=lambda t_s: jnp.array(0.0),  # todo: need to figure out how to handle this
-        f_c=float(7.2921e-5 * jnp.sin(jnp.deg2rad(lat_deg))),  # coriolis parameter
+        w_qv_s=w_qv_s_fn,
+        f_c=float(f_c),  # coriolis parameter
     )
 
     # Create initial conditions
-    ds_era5_init = ds_era5_grid.isel(valid_time=0)
+    ds_era5_init = ds_interp.isel(valid_time=0)
     init = ProgVarsMYNN(
         u=jnp.array(ds_era5_init["u"].values),
         v=jnp.array(ds_era5_init["v"].values),
-        thv=jnp.array(ds_era5_init["th"].values),  # todo: convert to VIRTUAAL pot temp
+        th=jnp.array(ds_era5_init["th"].values),
+        qv=jnp.array(ds_era5_init["q"].values),
         qke=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
     )
 
@@ -103,7 +109,7 @@ def get_era5_sim(
         forcing=frc,
         t_start_s=int(t_start_s),
         t_end_s=int(t_end_s),
-        t_index=ds_era5.indexes["valid_time"],
+        t_index=ds.indexes["valid_time"],
     )
 
     return sim

@@ -15,7 +15,7 @@ def download_data(lat_deg: float, lon_deg: float, time_slice: slice | str) -> xr
 
     # Variables to download from ERA5
     VARS_PL = ["z", "u", "v", "q", "t"]
-    VARS_SL = ["skt"]
+    VARS_SL = ["skt", "ie", "sp", "ishf", "t2m", "u10", "v10"]  # ishf and onwards mostly for checking
 
     if lon_deg < 0:
         lon_deg += 360  # ERA5 uses 0 to 360 for longitude
@@ -49,7 +49,7 @@ def download_data(lat_deg: float, lon_deg: float, time_slice: slice | str) -> xr
     ds_sl = ds_sl.sel(latitude=lat_sel, longitude=lon_sel)
 
     # Merge
-    ds = xr.merge([ds_pl, ds_sl])
+    ds = xr.merge([ds_pl, ds_sl], compat="override")
     # logger.info(f"Download size: {ds.nbytes / 1e6:.1f} MB")
     logger.info(f"Size on disk: {ds.nbytes / 1e6:.1f} MB")
     logger.info(ds.sizes)

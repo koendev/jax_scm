@@ -129,17 +129,17 @@ if __name__ == "__main__":
     # sim = cases.get_gabls1(Nz=64)
 
     # Wangara
-    sim = cases.get_wangara(Nz=200)
+    # sim = cases.get_wangara(Nz=200)
 
     # Cabauw from ERA5
-    # sim = get_era5_sim(
-    #     name="Cabauw_Test",
-    #     lat_deg=52.0,
-    #     lon_deg=5.0,
-    #     grid=StaggeredGrid(Nz=100, H=3000.0),
-    #     # time_slice=slice("2025-07-01", "2025-07-03"),
-    #     time_slice="2025-07-01",
-    # )
+    sim = get_era5_sim(
+        name="Cabauw_Test",
+        lat_deg=52.0,
+        lon_deg=5.0,
+        grid=StaggeredGrid(Nz=300, H=3000.0),
+        # time_slice=slice("2025-07-01", "2025-07-03"),
+        time_slice="2025-07-01",
+    )
 
     # Init and run model
     sfc = SurfaceProperties(z0m=0.1, z0h=0.1, sim_funcs=BusingerDyerSimFuncs())
