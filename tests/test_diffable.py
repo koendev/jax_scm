@@ -25,13 +25,13 @@ def mynn_state() -> Tuple[StaggeredGrid, mynn.ProgVarsMYNN, mynn.ProgVarsMYNN, m
         u=jnp.array(ds["u"]),
         v=jnp.array(ds["v"]),
         thv=jnp.array(ds["thv"]),
-        q_sq=jnp.array(ds["q_sq"]),
+        qke=jnp.array(ds["q_sq"]),
     )
     grads = mynn.ProgVarsMYNN(
         u=_d_dz(state.u, grid.dz),
         v=_d_dz(state.v, grid.dz),
         thv=_d_dz(state.thv, grid.dz),
-        q_sq=_d_dz(state.q_sq, grid.dz),
+        qke=_d_dz(state.qke, grid.dz),
     )
     mo_res = mo.MOResult(
         u_st=jnp.array(ds["u_st_sfc"]),
@@ -92,10 +92,10 @@ def test_mynn_diffable(mynn_state):
 
     def objective(u):
         """Pretend to minimize TKE terms. Just a test of differentiability because results of all equations."""
-        state_ = mynn.ProgVarsMYNN(u=u, v=state.v, thv=state.thv, q_sq=state.q_sq)
+        state_ = mynn.ProgVarsMYNN(u=u, v=state.v, thv=state.thv, qke=state.qke)
         diag = closure_fn(state_, grads, mo_res)
         q_sq_tt_ = (diag.w_qke[1:] + diag.w_qke[:-1]) / 2  # to full levels
-        return jnp.mean(q_sq_tt_ + diag.q_sq_P_S + diag.q_sq_P_B + diag.q_sq_eps)
+        return jnp.mean(q_sq_tt_ + diag.qke_P_S + diag.qke_P_B + diag.qke_eps)
 
     d_du = jax.grad(objective)(state.u)
     assert True

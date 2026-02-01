@@ -92,7 +92,7 @@ def get_era5_sim(
         u=jnp.array(ds_era5_init["u"].values),
         v=jnp.array(ds_era5_init["v"].values),
         thv=jnp.array(ds_era5_init["th"].values),  # todo: convert to VIRTUAAL pot temp
-        q_sq=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
+        qke=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
     )
 
     # Create simulation object

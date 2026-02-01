@@ -9,8 +9,7 @@ from jax import numpy as jnp
 
 from scm.interfaces import Simulation, ProgVarsT, DiagVarsT, ModelFn
 from scm.mo import MOResult
-
-Q_SQ_MIN = 1e-10  # clipping to avoid negative TKE
+from scm import consts
 
 
 class IterationTimer:
@@ -54,6 +53,15 @@ class IterationTimer:
         print(f"Total elapsed time: {self._format_long_duration(current_time - self.start_time)}")
 
 
+def clip_state(y: ProgVarsT) -> ProgVarsT:
+    """Clip state variables to physically meaningful ranges."""
+    if hasattr(y, "qke"):
+        y = dataclasses.replace(y, qke=jnp.clip(y.qke, min=consts.qke_min))
+    if hasattr(y, "qv"):
+        y = dataclasses.replace(y, qv=jnp.clip(y.qv, min=0))  # no negative humidity
+    return y
+
+
 def get_euler_step_fn(model: ModelFn) -> Callable:
     """Euler integrator factory."""
 
@@ -62,8 +70,7 @@ def get_euler_step_fn(model: ModelFn) -> Callable:
         """Euler integration. y0 is model state, dydt0 are ODE tendencies"""
         dydt0, diag0, mo_res0 = model(y0, **kwargs)
         y1 = jax.tree_util.tree_map(lambda y, dy: y + dt_s * dy, y0, dydt0)
-        if hasattr(y1, "q_sq"):
-            y1 = dataclasses.replace(y1, q_sq=jnp.clip(y1.q_sq, min=Q_SQ_MIN))
+        y1 = clip_state(y1)
         return y1, dydt0, diag0, mo_res0
 
     return _euler
@@ -78,8 +85,7 @@ def get_ab2_step_fn(model: ModelFn) -> Callable:
         dydt1, diag1, mo_res1 = model(y1, **kwargs)
         dydt_ab = jax.tree_util.tree_map(lambda d1, d0: (3 / 2) * d1 - (1 / 2) * d0, dydt1, dydt0)
         y2 = jax.tree_util.tree_map(lambda y, dy: y + dt_s * dy, y1, dydt_ab)
-        if hasattr(y2, "q_sq"):
-            y2 = dataclasses.replace(y2, q_sq=jnp.clip(y2.q_sq, min=Q_SQ_MIN))
+        y2 = clip_state(y2)
         return y2, dydt1, diag1, mo_res1
 
     return _ab2

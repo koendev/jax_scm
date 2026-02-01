@@ -46,7 +46,7 @@ def get_gabls1(Nz: int = 128, plot: bool = False, random_seed: int = 0) -> Simul
     tke = jnp.zeros(grid.Nz)
     tke = jnp.where(grid.z < 250, 0.4 * (1 - grid.z / 250) ** 3, tke)  # m^2 s^-2
 
-    init = ProgVarsMYNN(u=u, v=v, thv=th, q_sq=2 * tke)
+    init = ProgVarsMYNN(u=u, v=v, thv=th, qke=2 * tke)
 
     ## Surface model (not in use)
     # z0m = z0h = 0.1  # m, roughness lengths for momentum and heat
@@ -122,7 +122,7 @@ def get_ysu(Nz: int = 138, plot: bool = False) -> Simulation[ProgVarsMYNN]:
         u=u,
         v=v,
         thv=thv,
-        q_sq=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
+        qke=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
     )
 
     # Forcing
@@ -206,7 +206,7 @@ def get_ekman(Nz: int = 100, plot: bool = False) -> Simulation[ProgVarsMYNN]:
         u=ug.copy(),
         v=vg.copy(),
         thv=thv,
-        q_sq=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
+        qke=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
     )
 
     if plot:
@@ -267,7 +267,7 @@ def get_wangara(Nz: int = 50, plot: bool = False) -> Simulation[ProgVarsMYNN]:
         u=jnp.interp(grid.z, df["z"].values, df["u"].values),
         v=jnp.interp(grid.z, df["z"].values, df["v"].values),
         th=jnp.interp(grid.z, df["z"].values, df["th"].values),
-        q_sq=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
+        qke=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
         qv=jnp.zeros(grid.Nz),  # todo: check if there is humidity data
     )
 

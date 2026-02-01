@@ -18,7 +18,6 @@ from scm.interfaces import ModelFn, StaticForcing
 from scm.io.local import make_dataset
 from scm.mo import init_mo_sfc, MOResult, BusingerDyerSimFuncs, SurfaceProperties
 from scm.time_stepping import simulate_adaptive_dt
-import scm.conversions as conv
 import cases
 
 # jax.config.update("jax_disable_jit", True)
@@ -53,7 +52,7 @@ def init_model(
     @jax.jit
     def _model(state: ProgVarsMYNN, forcing: StaticForcing) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult]:
         # Unpack state
-        u, v, th, q_sq, qv = state.u, state.v, state.th, state.q_sq, state.qv
+        u, v, th, qke, qv = state.u, state.v, state.th, state.qke, state.qv
 
         # Unpack forcing
         f_c = forcing.f_c
@@ -68,8 +67,8 @@ def init_model(
         dv_dz = d_dz(v, dz=grid.dz, bot="edge", top=0.0)
         dth_dz = d_dz(th, dz=grid.dz, bot="edge", top=forcing.dth_dz_top)
         dqv_dz = d_dz(qv, dz=grid.dz, bot="edge", top=0.0)  # todo: upper BC?
-        dqsq_dz = d_dz(q_sq, dz=grid.dz, bot="edge", top=0.0)  # todo: lower BC = 0 ok?
-        grads = ProgVarsMYNN(u=du_dz, v=dv_dz, th=dth_dz, q_sq=dqsq_dz, qv=dqv_dz)
+        dqke_dz = d_dz(qke, dz=grid.dz, bot="edge", top=0.0)  # todo: lower BC = 0 ok?
+        grads = ProgVarsMYNN(u=du_dz, v=dv_dz, th=dth_dz, qke=dqke_dz, qv=dqv_dz)
 
         # Execute closure to get fluxes
         diag = closure_fn(state, grads, mo_res)
@@ -93,10 +92,10 @@ def init_model(
         v_tend = -f_c * u + f_c * u_geo - div_v_w
         th_tends = -div_w_th  # todo: some geostrophic wind term?
         qv_tends = -div_w_qv
-        q_sq_tend = diag.q_sq_P_S + diag.q_sq_P_B - diag.q_sq_eps + div_w_qke
+        qke_tends = diag.qke_P_S + diag.qke_P_B - diag.qke_eps + div_w_qke
 
         # Gather tendencies and updated diagnostics (because MOST values added!)
-        tends = ProgVarsMYNN(u=u_tend, v=v_tend, th=th_tends, qv=qv_tends, q_sq=q_sq_tend)
+        tends = ProgVarsMYNN(u=u_tend, v=v_tend, th=th_tends, qv=qv_tends, qke=qke_tends)
         diag = dataclasses.replace(diag, u_w=u_w, v_w=v_w, w_th=w_th, w_qv=w_qv)
         return tends, diag, mo_res
 
@@ -113,7 +112,7 @@ def init_from_xr(f: str, t: float) -> ProgVarsMYNN:
         u=jnp.array(ds_t["u"].values),
         v=jnp.array(ds_t["v"].values),
         th=jnp.array(ds_t["th"].values),
-        q_sq=jnp.array(ds_t["q_sq"].values),
+        qke=jnp.array(ds_t["q_sq"].values),
     )
     return state
 
