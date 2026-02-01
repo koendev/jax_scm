@@ -53,8 +53,7 @@ def init_model(
     @jax.jit
     def _model(state: ProgVarsMYNN, forcing: StaticForcing) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult]:
         # Unpack state
-        u, v, thv, q_sq, qv = state.u, state.v, state.thv, state.q_sq, state.qv
-        th_0 = conv.thv_to_th(thv=thv[0], qv=qv[0])
+        u, v, th, q_sq, qv = state.u, state.v, state.th, state.q_sq, state.qv
 
         # Unpack forcing
         f_c = forcing.f_c
@@ -62,15 +61,15 @@ def init_model(
         w_th_s, th_s, w_qv_s = forcing.w_th_s, forcing.th_s, forcing.w_qv_s
 
         # Run MO for surface coupling
-        mo_res: MOResult = eval_mo(u_0=u[0], v_0=v[0], th_0=th_0, qv_0=qv[0], w_th_s=w_th_s, th_s=th_s, w_qv_s=w_qv_s)
+        mo_res: MOResult = eval_mo(u_0=u[0], v_0=v[0], th_0=th[0], qv_0=qv[0], w_th_s=w_th_s, th_s=th_s, w_qv_s=w_qv_s)
 
         # Compute vertical gradients of state for fluxes (half levels, 1st order finite differences)
         du_dz = d_dz(u, dz=grid.dz, bot="edge", top=0.0)
         dv_dz = d_dz(v, dz=grid.dz, bot="edge", top=0.0)
-        dthv_dz = d_dz(thv, dz=grid.dz, bot="edge", top=forcing.dth_dz_top)  # todo: can I assume dry pot temp here?
+        dth_dz = d_dz(th, dz=grid.dz, bot="edge", top=forcing.dth_dz_top)
         dqv_dz = d_dz(qv, dz=grid.dz, bot="edge", top=0.0)  # todo: upper BC?
         dqsq_dz = d_dz(q_sq, dz=grid.dz, bot="edge", top=0.0)  # todo: lower BC = 0 ok?
-        grads = ProgVarsMYNN(u=du_dz, v=dv_dz, thv=dthv_dz, q_sq=dqsq_dz, qv=dqv_dz)
+        grads = ProgVarsMYNN(u=du_dz, v=dv_dz, th=dth_dz, q_sq=dqsq_dz, qv=dqv_dz)
 
         # Execute closure to get fluxes
         diag = closure_fn(state, grads, mo_res)
@@ -78,28 +77,27 @@ def init_model(
         # Update fluxes with MO results
         u_w = diag.u_w.at[0].set(mo_res.u_w)
         v_w = diag.v_w.at[0].set(mo_res.v_w)
-        w_thv = diag.w_thv.at[0].set(mo_res.w_thv)
-        w_th = diag.w_th.at[0].set(mo_res.w_th)  # this is just for diagnostics
+        w_th = diag.w_th.at[0].set(mo_res.w_th)
         w_qv = diag.w_qv.at[0].set(mo_res.w_qv)
         w_qke = diag.w_qke  # todo: any update for TKE needed?
 
         # Compute flux divergence (half levels -> full levels)
         div_u_w = (u_w[1:] - u_w[:-1]) / grid.dz
         div_v_w = (v_w[1:] - v_w[:-1]) / grid.dz
-        div_w_thv = (w_thv[1:] - w_thv[:-1]) / grid.dz
+        div_w_th = (w_th[1:] - w_th[:-1]) / grid.dz
         div_w_qv = (w_qv[1:] - w_qv[:-1]) / grid.dz
         div_w_qke = (w_qke[1:] - w_qke[:-1]) / grid.dz
 
         # Compute tendencies
         u_tend = f_c * v - f_c * v_geo - div_u_w
         v_tend = -f_c * u + f_c * u_geo - div_v_w
-        thv_tends = -div_w_thv  # todo: some geostrophic wind term?
+        th_tends = -div_w_th  # todo: some geostrophic wind term?
         qv_tends = -div_w_qv
         q_sq_tend = diag.q_sq_P_S + diag.q_sq_P_B - diag.q_sq_eps + div_w_qke
 
         # Gather tendencies and updated diagnostics (because MOST values added!)
-        tends = ProgVarsMYNN(u=u_tend, v=v_tend, thv=thv_tends, qv=qv_tends, q_sq=q_sq_tend)
-        diag = dataclasses.replace(diag, u_w=u_w, v_w=v_w, w_thv=w_thv, w_th=w_th, w_qv=w_qv)
+        tends = ProgVarsMYNN(u=u_tend, v=v_tend, th=th_tends, qv=qv_tends, q_sq=q_sq_tend)
+        diag = dataclasses.replace(diag, u_w=u_w, v_w=v_w, w_th=w_th, w_qv=w_qv)
         return tends, diag, mo_res
 
     return _model
@@ -114,7 +112,7 @@ def init_from_xr(f: str, t: float) -> ProgVarsMYNN:
     state = ProgVarsMYNN(
         u=jnp.array(ds_t["u"].values),
         v=jnp.array(ds_t["v"].values),
-        thv=jnp.array(ds_t["thv"].values),
+        th=jnp.array(ds_t["th"].values),
         q_sq=jnp.array(ds_t["q_sq"].values),
     )
     return state

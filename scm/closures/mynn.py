@@ -6,11 +6,11 @@ import jax
 import jax.numpy as jnp
 
 from scm import consts
+from scm import conversions as conv
+from scm.grad import d_dz
 from scm.grid import StaggeredGrid
 from scm.interfaces import ClosureFn
-from scm.grad import d_dz
 from scm.mo import MOResult
-from scm import conversions as conv
 
 
 @jax.tree_util.register_dataclass
@@ -20,24 +20,19 @@ class ProgVarsMYNN:
 
     u: jnp.ndarray
     v: jnp.ndarray
-    thv: jnp.ndarray  # virtual potential temperature
+    th: jnp.ndarray  # potential temperature (no condensation, so th_l = th)
     qv: jnp.ndarray  # specific humidity (vapor only, no condensation)
     q_sq: jnp.ndarray  #  q^2 = uu + vv + ww = 2*TKE
-    # No condensation implemented
-    # thl: jnp.ndarray  # liquid water potential temperature
-    # q_w: jnp.ndarray  # total water content q_w = q_l + q_v (liquid + vapor)
 
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True)
 class DiagVarsMYNN:
-    th: jnp.ndarray  # diagnosed dry potential temperature
-
     # Parameterized fluxes and variances
     u_w: jnp.ndarray
     v_w: jnp.ndarray
-    w_thv: jnp.ndarray  # buoyancy flux (virtual potential temperature flux)
     w_th: jnp.ndarray  # sensible heat flux
+    w_thv: jnp.ndarray  # buoyancy flux (virtual potential temperature flux)
     w_qv: jnp.ndarray  # moisture flux
     th_th: jnp.ndarray  # potential temperature variance
 
@@ -75,15 +70,35 @@ def init_mynn(grid: StaggeredGrid) -> ClosureFn[ProgVarsMYNN, DiagVarsMYNN]:
     q_sq_min = 1e-10  # minimum TKE to avoid div by zero  # todo: check wrf implementation
     g_m_min = 1e-12
 
+    # def _partial_condensation(wth_l, w_qw, SH25):
+    #     """Not in use"""
+    #     # Compute liquid water content (ql)
+    #     a = (1 + Lv / cp * del_qsl) ** (-1)  # B5, NN09
+    #     b = (T / th) * del_qsl  # B6, NN09
+    #     sigma_s = jnp.sqrt(
+    #         (a**2 * L**2 * alpha_c * B2 * SH25) / 4 * (dqw_dz - b * dthl_dz) ** 2
+    #     )  # B7, NN09 (2.5 level version)
+    #     q1 = a * (qw - qsl) / (2 * sigma_s)  # B4, NN09
+    #     R = 0.5 * (1 + erf(q1 / jnp.sqrt(2)))  # B2, NN09 (cloud fraction)
+    #
+    #     ql = 2 * sigma_s * (R * q1 + 1 / jnp.sqrt(2 * jnp.pi) * jnp.exp(-(q1**2) / 2))  # B1, NN09
+    #
+    #     # Compute buoyancy flux w_thv
+    #     R_tilde = R - ql / (2 * sigma_s * jnp.sqrt(2 * jnp.pi)) * jnp.exp(-(q1**2) / 2)  # B11, NN09
+    #     beta_th = 1 + 0.61 * qw - 1.61 * ql - R_tilde * a * b * c  # B5, NN09
+    #     beta_q = 0.61 * th + R_tilde * a * c  # B10, NN09
+    #     w_thv = beta_th * w_thl + beta_q * w_qw  # B8, NN09
+    #
+    #     return w_thv, ql
+
     def _closure(state: ProgVarsMYNN, grads: ProgVarsMYNN, mo_res: MOResult) -> DiagVarsMYNN:
-        # in MYNN, q_sq is 2*TKE not specific humidity!
-        u, v, thv, qv = state.u, state.v, state.thv, state.qv
+        # In MYNN, q_sq is 2*TKE not specific humidity!
         q = jnp.sqrt(jnp.clip(state.q_sq, min=q_sq_min))  # clip to avoid div by zero
         q = jnp.pad((q[1:] + q[:-1]) / 2, 1, mode="edge")  # interp to half-levels  # todo: maybe pad to zero
 
-        # Compute dry potential temperature gradient
-        th = conv.thv_to_th(thv=thv, qv=qv)
-        dth_dz = d_dz(th, dz=grid.dz, bot="edge", top=0.0)  # todo: should have top BC from forcing here
+        # Virtual potential temperature gradient needed for buoyancy terms
+        thv = conv.th_to_thv(th=state.th, qv=state.qv)
+        dthv_dz = d_dz(thv, dz=grid.dz, bot="edge", top=grads.th[-1])
 
         ## Length scale (all on half-levels)
         # Surface length scale (eq 53, NN09)
@@ -102,11 +117,11 @@ def init_mynn(grid: StaggeredGrid) -> ClosureFn[ProgVarsMYNN, DiagVarsMYNN]:
         L_T = 0.23 * jnp.trapezoid(q * grid.zh, grid.zh) / jnp.trapezoid(q, grid.zh)  # todo: maybe better on non-interp
 
         # Buoyance length scale (eq 55, NN09)
-        th_0 = th[0]  # todo: NN09 uses dry pot temp, but should this be virtual pot temp?
-        N = jnp.sqrt(jnp.clip(consts.g / th_0 * grads.thv, a_min=0.0))
+        th_0 = state.th[0]  # todo: where is reference temp?
+        N = jnp.sqrt(jnp.clip(consts.g / th_0 * grads.th, a_min=0.0))  # in line after eq 55, NN09
         q_c = jnp.clip((consts.g / th_0) * mo_res.w_thv * L_T, a_min=0.0) ** (1 / 3)  # in line after eq 55, NN09
         L_B = jnp.where(
-            grads.thv <= 0,
+            dthv_dz <= 0,
             jnp.inf,
             jnp.where(
                 zeta >= 0,
@@ -121,7 +136,7 @@ def init_mynn(grid: StaggeredGrid) -> ClosureFn[ProgVarsMYNN, DiagVarsMYNN]:
         # todo: check what this does
         G_M = L**2 / q**2 * (grads.u**2 + grads.v**2)  # eq 39, NN09
         # G_H = -(L**2) / q**2 * consts.g / th_0 * (beta_th * grads.th_l + beta_q * grads.q_w)  # eq 40, NN09
-        G_H = -(L**2) / q**2 * consts.g / th_0 * grads.thv  # eq 40, NN09 (virt. pot. temp. version)
+        G_H = -(L**2) / q**2 * consts.g / th_0 * dthv_dz  # eq 40, NN09 (virt. pot. temp. version)
         Ri = -G_H / (G_M + g_m_min)  # above eq A11, NN09, gradient Richardson number
 
         ## Level-2 closure
@@ -179,18 +194,18 @@ def init_mynn(grid: StaggeredGrid) -> ClosureFn[ProgVarsMYNN, DiagVarsMYNN]:
         Kh = L * q * SH
 
         # Parameterized fluxes
-        u_w = -Km * grads.u
-        v_w = -Km * grads.v
-        w_thv = -Kh * grads.thv  # buoyancy flux
-        w_th = -Kh * dth_dz  # sensible heat flux, todo: this should be the same as conversion from w_thv, right?
-        w_qv = -Kh * grads.qv  # moisture flux
+        u_w = -Km * grads.u  # eq. 18, NN09
+        v_w = -Km * grads.v  # eq. 19, NN09
+        w_th = -Kh * grads.th  # sensible heat flux, eq. 20, NN09
+        w_thv = -Kh * dthv_dz  # my own assumption for buoyancy flux. NN09 have partial condensation
+        w_qv = -Kh * grads.qv  # moisture flux, eq. 21, NN09
 
         # TKE turbulent transport
         w_qke = L * q * Sq * grads.q_sq  # eq 24, MY82
 
         # Parameterized dry pot. temp. variance
         lam2 = B2 * L  # eq 12, MY82
-        th_th = -lam2 / q * w_th * dth_dz  # eq 29, MY82
+        th_th = -lam2 / q * w_th * grads.th  # eq 29, MY82
 
         # TKE production and dissipation (needed on full levels)
         P_S = -(u_w * grads.u + v_w * grads.v)  # shear production, eq. 5, NN09
@@ -200,17 +215,15 @@ def init_mynn(grid: StaggeredGrid) -> ClosureFn[ProgVarsMYNN, DiagVarsMYNN]:
         P_B = (P_B[1:] + P_B[:-1]) / 2  # average to full levels
 
         L_full = (L[1:] + L[:-1]) / 2  # average first to eliminate L=0 at surface leading to div by zero below
-        eps = state.q_sq ** (3 / 2) / (B1 * L_full)  # dissipation, eq. 12, NN09
+        eps = state.q_sq ** (3 / 2) / (B1 * L_full)  # dissipation, eq. 12, NN09 (q^3 = (q^2)^(3/2))
 
         # CT2
-        # ct2 = 3.2 * B1 ** (1 / 3) / B2 * L ** (-2 / 3) * th_th
-        # todo: check simplification
         # Simplified to avoid NaN from 0 * inf when L=0, since th_th is proportional to L.
+        # ct2 = 3.2 * B1 ** (1 / 3) / B2 * L ** (-2 / 3) * th_th
         # th_th = -lam2 / q * th_w * dth_dz, where lam2 = B2 * L
-        ct2 = -3.2 * B1 ** (1 / 3) * jnp.clip(L, a_min=0.0) ** (1 / 3) / q * w_thv * dth_dz
+        ct2 = -3.2 * B1 ** (1 / 3) * jnp.clip(L, a_min=0.0) ** (1 / 3) / q * w_th * grads.th
 
         return DiagVarsMYNN(
-            th=th,
             u_w=u_w,
             v_w=v_w,
             w_th=w_th,

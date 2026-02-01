@@ -266,7 +266,7 @@ def get_wangara(Nz: int = 50, plot: bool = False) -> Simulation[ProgVarsMYNN]:
     init = ProgVarsMYNN(
         u=jnp.interp(grid.z, df["z"].values, df["u"].values),
         v=jnp.interp(grid.z, df["z"].values, df["v"].values),
-        thv=jnp.interp(grid.z, df["z"].values, df["th"].values),  # todo: is this virtual?
+        th=jnp.interp(grid.z, df["z"].values, df["th"].values),
         q_sq=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
         qv=jnp.zeros(grid.Nz),  # todo: check if there is humidity data
     )
@@ -279,7 +279,7 @@ def get_wangara(Nz: int = 50, plot: bool = False) -> Simulation[ProgVarsMYNN]:
         ax_uv.set_xlabel("Wind (m/s)")
         ax_uv.set_ylabel("Height (m)")
         ax_uv.legend()
-        ax_th.plot(init.thv, grid.z)
+        ax_th.plot(init.th, grid.z)
         ax_th.set_xlabel("Potential Temperature (K)")
         fig.show()
 
