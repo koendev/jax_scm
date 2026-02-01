@@ -24,22 +24,25 @@ def mynn_state() -> Tuple[StaggeredGrid, mynn.ProgVarsMYNN, mynn.ProgVarsMYNN, m
     state = mynn.ProgVarsMYNN(
         u=jnp.array(ds["u"]),
         v=jnp.array(ds["v"]),
-        thv=jnp.array(ds["thv"]),
-        qke=jnp.array(ds["q_sq"]),
+        th=jnp.array(ds["th"]),
+        qke=jnp.array(ds["qke"]),
+        qv=jnp.array(ds["qv"]),
     )
     grads = mynn.ProgVarsMYNN(
         u=_d_dz(state.u, grid.dz),
         v=_d_dz(state.v, grid.dz),
-        thv=_d_dz(state.thv, grid.dz),
+        th=_d_dz(state.th, grid.dz),
         qke=_d_dz(state.qke, grid.dz),
+        qv=_d_dz(state.qv, grid.dz),
     )
     mo_res = mo.MOResult(
         u_st=jnp.array(ds["u_st_sfc"]),
         w_th=jnp.array(ds["w_th_sfc"]),
+        w_thv=jnp.array(ds["w_thv_sfc"]),
         th_s=jnp.array(ds["th_s_sfc"]),
         v_w=jnp.array(ds["v_w_sfc"]),
         u_w=jnp.array(ds["u_w_sfc"]),
-        w_qv=jnp.array(ds["w_q_sfc"]),
+        w_qv=jnp.array(ds["w_qv_sfc"]),
         L=jnp.array(ds["L_sfc"]),
         zeta=jnp.array(ds["zeta_sfc"]),
         zeta_err=jnp.array(ds["zeta_err_sfc"]),
@@ -92,7 +95,7 @@ def test_mynn_diffable(mynn_state):
 
     def objective(u):
         """Pretend to minimize TKE terms. Just a test of differentiability because results of all equations."""
-        state_ = mynn.ProgVarsMYNN(u=u, v=state.v, thv=state.thv, qke=state.qke)
+        state_ = mynn.ProgVarsMYNN(u=u, v=state.v, th=state.th, qke=state.qke, qv=state.qv)
         diag = closure_fn(state_, grads, mo_res)
         q_sq_tt_ = (diag.w_qke[1:] + diag.w_qke[:-1]) / 2  # to full levels
         return jnp.mean(q_sq_tt_ + diag.qke_P_S + diag.qke_P_B + diag.qke_eps)
