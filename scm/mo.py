@@ -91,58 +91,104 @@ class BusingerDyerSimFuncs(MOSimilarityFuncs):
     """
 
     def __init__(self, gamma: float = 16, b: float = 5):
-        self.gamma = gamma
-        self.b = b
+        self.gamma_m = gamma
+        self.gamma_h = gamma
+        self.b_m = b
+        self.b_h = b
 
     def get_phi_m_fn(self) -> SimFuncType:
+        """Similarity function for momentum
+
+        phi_m(zeta) = {
+            (1 - gamma * zeta)^{-1/4},  zeta < 0 (unstable)
+            1 + b * zeta,               zeta >= 0 (stable)
+        }
+        """
 
         @jax.jit
         def _phi_m(zeta):
-            x = jnp.maximum((1 - self.gamma * zeta), 1e-10) ** (1 / 4)  # exponent is different for m and h
+            x = jnp.maximum((1 - self.gamma_m * zeta), 1e-10) ** (1 / 4)  # exponent is different for m and h
             return jnp.where(
                 zeta < 0,
                 1 / x,  # unstable
-                1 + self.b * zeta,  # stable
+                1 + self.b_m * zeta,  # stable
             )
 
         return _phi_m
 
     def get_phi_h_fn(self) -> SimFuncType:
+        """Similarity function for heat
+
+        phi_h(zeta) = {
+            (1 - gamma * zeta)^{-1/2},  zeta < 0 (unstable)
+            1 + b * zeta,               zeta >= 0 (stable)
+        }
+        """
 
         @jax.jit
         def _phi_h(zeta):
-            x = jnp.maximum((1 - self.gamma * zeta), 1e-10) ** (1 / 2)  # exponent is different for m and h
+            x = jnp.maximum((1 - self.gamma_h * zeta), 1e-10) ** (1 / 2)  # exponent is different for m and h
             return jnp.where(
                 zeta < 0,
                 1 / x,  # unstable
-                1 + self.b * zeta,  # stable
+                1 + self.b_h * zeta,  # stable
             )
 
         return _phi_h
 
     def get_psi_m_fn(self) -> SimFuncType:
+        """Integrated similarity function for momentum
+
+        psi_m(zeta) = {
+            2 * log((1 + x)/2) + log((1 + x^2)/2) - 2 * arctan(x) + pi/2,   zeta < 0 (unstable)
+            -b * zeta,                                                      zeta >= 0 (stable)
+        }
+        with x = (1 - gamma * zeta)^{1/4}
+
+        """
+
         @jax.jit
         def _psi_m(zeta):
-            x = jnp.maximum((1 - self.gamma * zeta), 1e-10) ** (1 / 4)  # here, exponents are the same for m and h
+            x = jnp.maximum((1 - self.gamma_m * zeta), 1e-10) ** (1 / 4)  # here, exponents are the same for m and h
             return jnp.where(
                 zeta < 0,
                 2 * jnp.log((1 + x) / 2) + jnp.log((1 + x**2) / 2) - 2 * jnp.atan(x) + jnp.pi / 2,  # unstable
-                -self.b * zeta,  # stable
+                -self.b_m * zeta,  # stable
             )
 
         return _psi_m
 
     def get_psi_h_fn(self) -> SimFuncType:
+        """Integrated similarity function for heat
+
+        psi_h(zeta) = {
+            2 * log((1 + x^2)/2),   zeta < 0 (unstable)
+            -b * zeta,              zeta >= 0 (stable)
+        }
+        with x = (1 - gamma * zeta)^{1/4}
+
+        """
+
         @jax.jit
         def _psi_h(zeta):
-            x = jnp.maximum((1 - self.gamma * zeta), 1e-10) ** (1 / 4)  # here, exponents are the same for m and h
+            x = jnp.maximum((1 - self.gamma_h * zeta), 1e-10) ** (1 / 4)  # here, exponents are the same for m and h
             return jnp.where(
                 zeta < 0,
                 2 * jnp.log((1 + x**2) / 2),  # unstable
-                -self.b * zeta,  # stable
+                -self.b_h * zeta,  # stable
             )
 
         return _psi_h
+
+
+class BusingerDyerAltSimFuncs(BusingerDyerSimFuncs):
+    """Alternative formulation allowing separate gamma and b for momentum and heat"""
+
+    def __init__(self, gamma_m: float = 16, gamma_h: float = 16, b_m: float = 5, b_h: float = 5):
+        self.gamma_m = gamma_m
+        self.gamma_h = gamma_h
+        self.b_m = b_m
+        self.b_h = b_h
 
 
 @jax.jit

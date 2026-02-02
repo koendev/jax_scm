@@ -43,7 +43,7 @@ def make_dataset(
     diag_ds = xr.Dataset(diag_dict, coords={"time": time, "zh": grid.zh, "z": grid.z})
 
     mo_dict = dataclasses.asdict(mo_hist)
-    mo_dict = {f"{v}_sfc": (("time",), v_data) for v, v_data in mo_dict.items()}
+    mo_dict = {f"mo_{v}": (("time",), v_data) for v, v_data in mo_dict.items()}
     mo_ds = xr.Dataset(mo_dict, coords={"time": time})
 
     return xr.merge([state_ds, diag_ds, mo_ds])
