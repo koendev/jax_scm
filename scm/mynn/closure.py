@@ -59,9 +59,9 @@ def init_closure(grid: StaggeredGrid) -> ClosureFn[ProgVarsMYNN, DiagVarsMYNN]:
     @jax.jit
     def _closure(state: ProgVarsMYNN, grads: ProgVarsMYNN, mo_res: MOResult) -> DiagVarsMYNN:
         # In MYNN, qke (q^2) is 2*TKE not specific humidity!
-        q = jnp.sqrt(jnp.clip(state.qke, min=consts.qke_min))  # clip to avoid div by zero
-        q = jnp.pad((q[1:] + q[:-1]) / 2, 1, mode="edge")  # interp to half-levels  # todo: maybe pad to zero
-        q = q.at[0].set(get_qke_sfc(u_st=mo_res.u_st) ** (1 / 2))  # surface BC for q, not q^2!
+        qke_h = jnp.pad((state.qke[:-1] + state.qke[1:]) / 2, 1, mode="edge")
+        qke_h = qke_h.at[0].set(get_qke_sfc(u_st=mo_res.u_st))  # apply surface BC
+        q = jnp.sqrt(jnp.clip(qke_h, min=consts.qke_min))  # turbulent velocity scale
 
         # Virtual potential temperature gradient needed for buoyancy terms
         thv = conv.th_to_thv(th=state.th, qv=state.qv)
@@ -159,6 +159,13 @@ def init_closure(grid: StaggeredGrid) -> ClosureFn[ProgVarsMYNN, DiagVarsMYNN]:
         # Eddy diffusivities
         Km = L * q * SM
         Kh = L * q * SH
+
+        # Simple 1-2-1 filter to dampen vertical oscillations
+        # todo: find reference for this
+        Km_padded = jnp.pad(Km, 1, mode="edge")
+        Km = (Km_padded[:-2] + 2 * Km_padded[1:-1] + Km_padded[2:]) / 4
+        Kh_padded = jnp.pad(Kh, 1, mode="edge")
+        Kh = (Kh_padded[:-2] + 2 * Kh_padded[1:-1] + Kh_padded[2:]) / 4
 
         # Parameterized fluxes
         u_w = -Km * grads.u  # eq. 18, NN09
