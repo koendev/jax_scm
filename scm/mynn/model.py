@@ -13,7 +13,7 @@ from scm.mynn.closure import init_closure, get_qke_sfc
 from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
 
 
-def init_model(sim: Simulation[ProgVarsMYNN]) -> ModelFn[ProgVarsMYNN, DiagVarsMYNN]:
+def init_model(sim: Simulation[ProgVarsMYNN, DiagVarsMYNN]) -> ModelFn[ProgVarsMYNN, DiagVarsMYNN]:
     """Initialize MYNN model function for time stepper."""
     # Make grid and forcing available locally
     grid: StaggeredGrid = sim.grid
@@ -80,6 +80,12 @@ def init_model(sim: Simulation[ProgVarsMYNN]) -> ModelFn[ProgVarsMYNN, DiagVarsM
 
         # Gather tendencies
         tends = ProgVarsMYNN(u=u_tend, v=v_tend, th=th_tends, qv=qv_tends, qke=qke_tends)
+
+        # Add large scale tendencies if provided as tendencies
+        if forcing.ls_tends is not None:
+            ls_tends = forcing.ls_tends(t_s, state, grads, diag)
+            tends = jax.tree_util.tree_map(lambda x, ls_x: x + ls_x, tends, ls_tends)
+
         return tends, diag, mo_res
 
     return _model
