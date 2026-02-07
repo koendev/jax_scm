@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Tuple
 
 import jax
+import jax.numpy as jnp
 
 from scm.grad import d_dz
 from scm.grid import StaggeredGrid
-from scm.interfaces import Simulation, ModelFn, StaticForcing
+from scm.interfaces import Simulation, ModelFn, Forcing
 from scm.mo import init_mo_sfc, MOResult
 from scm.mynn.closure import init_closure, get_qke_sfc
 from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
@@ -14,8 +15,9 @@ from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
 
 def init_model(sim: Simulation[ProgVarsMYNN]) -> ModelFn[ProgVarsMYNN, DiagVarsMYNN]:
     """Initialize MYNN model function for time stepper."""
-    # Make grid available locally
+    # Make grid and forcing available locally
     grid: StaggeredGrid = sim.grid
+    forcing: Forcing = sim.forcing
 
     # Create MO model
     z_mo = float(grid.z[0])
@@ -31,15 +33,18 @@ def init_model(sim: Simulation[ProgVarsMYNN]) -> ModelFn[ProgVarsMYNN, DiagVarsM
     closure_fn = init_closure(grid=grid)
 
     @jax.jit
-    def _model(state: ProgVarsMYNN, forcing: StaticForcing) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult]:
+    def _model(t_s: jnp.ndarray, state: ProgVarsMYNN) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult]:
         """Model function takes state and forcing and returns tendencies and diagnostics."""
         # Unpack state
         u, v, th, qke, qv = state.u, state.v, state.th, state.qke, state.qv
 
-        # Unpack forcing
+        # Forcing for this step
         f_c = forcing.f_c
-        u_geo, v_geo = forcing.u_geo, forcing.v_geo
-        w_th_s, th_s, w_qv_s = forcing.w_th_s, forcing.th_s, forcing.w_qv_s
+        u_geo = forcing.u_geo(t_s)
+        v_geo = forcing.v_geo(t_s)
+        w_th_s = forcing.w_th_s(t_s) if forcing.w_th_s is not None else None
+        th_s = forcing.th_s(t_s) if forcing.th_s is not None else None
+        w_qv_s = forcing.w_qv_s(t_s)
 
         # Run MO for surface coupling
         mo_res: MOResult = eval_mo(u_0=u[0], v_0=v[0], th_0=th[0], qv_0=qv[0], w_th_s=w_th_s, th_s=th_s, w_qv_s=w_qv_s)

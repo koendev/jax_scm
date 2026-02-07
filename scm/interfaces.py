@@ -5,7 +5,7 @@ Specific interfaces for each model (containing extra variables) should be define
 from __future__ import annotations
 
 import dataclasses
-from typing import Protocol, Tuple, TypeVar, Callable, Generic
+from typing import Protocol, Tuple, TypeVar, Generic
 
 import jax.numpy as jnp
 import jax.tree_util
@@ -29,7 +29,7 @@ class Simulation(Generic[ProgVarsT]):
     grid: StaggeredGrid
     mo_settings: MOSettings
     init: ProgVarsT
-    forcing: TransientForcing
+    forcing: Forcing
 
     t_start_s: int
     t_end_s: int
@@ -38,30 +38,7 @@ class Simulation(Generic[ProgVarsT]):
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, kw_only=True)
-class StaticForcing:
-    """Static forcing using geostrophic wind and surface heat flux or temperature."""
-
-    # Geostrophic wind components
-    u_geo: jnp.ndarray  # Unit: m/s; Shape: (1,) or (Nz,)
-    v_geo: jnp.ndarray  # Unit: m/s; Shape: (1,) or (Nz,)
-
-    # Coriolis parameter
-    f_c: float  # Unit: (1/s); Shape: (1,)
-
-    # Surface heat flux or temperature
-    w_th_s: jnp.ndarray | None = None  # Unit: (K m/s); Shape: (1,)
-    th_s: jnp.ndarray | None = None  # Unit: (K); Shape: (1,)
-
-    # Latent heat flux
-    w_qv_s: jnp.ndarray | None = None  # Unit: (kg/kg m/s); Shape: (1,)
-
-    # Capping inversion at domain top
-    dth_dz_top: float = 0.01  # Unit: (K/m)
-
-
-@jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class TransientForcing:
+class Forcing:
     # Geostrophic wind components
     u_geo: ForcingFn  # Unit: m/s; must return (Nz,)
     v_geo: ForcingFn  # Unit: m/s; must return (Nz,)
@@ -73,36 +50,19 @@ class TransientForcing:
     w_th_s: ForcingFn | None = None  # Unit: (K m/s); must return scalar
     th_s: ForcingFn | None = None  # Unit: K, must return scalar
 
-    # Latent heat flux
+    # Surface Latent heat flux
     w_qv_s: ForcingFn  # Unit: (kg/kg m/s); must return scalar
 
     # Capping inversion at domain top
     dth_dz_top: float = 0.01  # Unit: (K/m)
 
-    def get_eval_fn(self) -> Callable[[jnp.ndarray], StaticForcing]:
-        """Evaluate the transient forcing at time t_s to produce a StaticForcing instance."""
-        if self.w_th_s is None and self.th_s is None:
-            raise ValueError("At least one of w_th_s or th_s must be set.")
-        if self.w_th_s is not None and self.th_s is not None:
-            raise ValueError("Only one of w_th_s or th_s can be set.")
-
-        @jax.jit
-        def _eval_fn(t_s: jnp.ndarray) -> StaticForcing:
-            return StaticForcing(
-                u_geo=self.u_geo(t_s),
-                v_geo=self.v_geo(t_s),
-                f_c=self.f_c,
-                w_th_s=self.w_th_s(t_s) if self.w_th_s is not None else None,
-                th_s=self.th_s(t_s) if self.th_s is not None else None,
-                w_qv_s=self.w_qv_s(t_s),
-                dth_dz_top=self.dth_dz_top,
-            )
-
-        return _eval_fn
+    def __post_init__(self):
+        if not ((self.w_th_s is None) or (self.th_s is None)):
+            raise ValueError("Exactly one of w_th_s and th_s must be provided.")
 
 
 class ModelFn(Protocol[ProgVarsT, DiagVarsT]):
-    def __call__(self, state: ProgVarsT, **kwargs) -> Tuple[ProgVarsT, DiagVarsT, MOResult]:
+    def __call__(self, t_s: jnp.ndarray, state: ProgVarsT) -> Tuple[ProgVarsT, DiagVarsT, MOResult]:
         """Compute tendencies, i.e., right-hand side of ODEs."""
 
 

@@ -66,9 +66,9 @@ def get_euler_step_fn(model: ModelFn) -> Callable:
     """Euler integrator factory."""
 
     @jax.jit
-    def _euler(dt_s: float, y0, **kwargs):
+    def _euler(t_s, dt_s, y0):
         """Euler integration. y0 is model state, dydt0 are ODE tendencies"""
-        dydt0, diag0, mo_res0 = model(y0, **kwargs)
+        dydt0, diag0, mo_res0 = model(t_s, y0)
         y1 = jax.tree_util.tree_map(lambda y, dy: y + dt_s * dy, y0, dydt0)
         y1 = clip_state(y1)
         return y1, dydt0, diag0, mo_res0
@@ -80,9 +80,9 @@ def get_ab2_step_fn(model: ModelFn) -> Callable:
     """Two-step Adams-Bashforth integrator factory."""
 
     @jax.jit
-    def _ab2(dt_s: float, y1, dydt0, **kwargs):
+    def _ab2(t_s, dt_s, y1, dydt0):
         """Two-step Adams-Bashforth integration. y1 is state (i-1), dydt0 are tendencies (i-2)."""
-        dydt1, diag1, mo_res1 = model(y1, **kwargs)
+        dydt1, diag1, mo_res1 = model(t_s, y1)
         dydt_ab = jax.tree_util.tree_map(lambda d1, d0: (3 / 2) * d1 - (1 / 2) * d0, dydt1, dydt0)
         y2 = jax.tree_util.tree_map(lambda y, dy: y + dt_s * dy, y1, dydt_ab)
         y2 = clip_state(y2)
@@ -102,9 +102,6 @@ def simulate(
     _euler = get_euler_step_fn(model)
     _ab2 = get_ab2_step_fn(model)
 
-    # Create forcing evaluation function
-    get_forcing = sim.forcing.get_eval_fn()
-
     # Setup timestep arrays
     # Inner steps shifted by dt because initial Euler step is taken outside loop
     t_outer = jnp.arange(sim.t_start_s, sim.t_end_s, dt_s_out)
@@ -120,7 +117,7 @@ def simulate(
     def _scan_inner(carry, t):
         """Advance model by one step but don't accumulate outputs"""
         y1, dydt0, _, _ = carry
-        y2, dydt1, diag1, mo_res1 = _ab2(dt_s, y1, dydt0, forcing=get_forcing(t))
+        y2, dydt1, diag1, mo_res1 = _ab2(t, dt_s, y1, dydt0)
         return (y2, dydt1, diag1, mo_res1), None
 
     @jax.jit
@@ -132,7 +129,7 @@ def simulate(
 
     jax.debug.print("Begin simulation...")
     y0 = sim.init
-    y1, dydt0, diag0, mo_res0 = _euler(dt_s, y0, forcing=get_forcing(t_outer[0]))  # Warmup: one Euler step
+    y1, dydt0, diag0, mo_res0 = _euler(t_outer[0], dt_s, y0)  # Warmup: one Euler step
     _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, dydt0, diag0, mo_res0), xs=t_outer)
     timer.finalize()
 
@@ -151,9 +148,6 @@ def simulate_adaptive_dt(
     # Setup time integration
     _euler = get_euler_step_fn(model)
     _ab2 = get_ab2_step_fn(model)
-
-    # Create forcing evaluation function
-    get_forcing = sim.forcing.get_eval_fn()
 
     # Setup outer loop and timer
     t_outer = jnp.arange(sim.t_start_s, sim.t_end_s, dt_s_out)
@@ -179,7 +173,7 @@ def simulate_adaptive_dt(
         dt_s = jnp.minimum(_get_dt(Km=diag0.Km, Kh=diag0.Kh), t_left)
 
         # Integrate one step
-        y2, dydt1, diag1, mo_res1 = _ab2(dt_s, y1, dydt0, forcing=get_forcing(t))
+        y2, dydt1, diag1, mo_res1 = _ab2(t, dt_s, y1, dydt0)
 
         # Advance time
         t_left = t_left - dt_s
@@ -206,7 +200,7 @@ def simulate_adaptive_dt(
 
     jax.debug.print("Begin simulation...")
     y0 = sim.init
-    y1, dydt0, diag0, mo_res0 = _euler(dt_s_init, y0, forcing=get_forcing(t_outer[0]))  # Warmup: one Euler step
+    y1, dydt0, diag0, mo_res0 = _euler(t_outer[0], dt_s_init, y0)  # Warmup: one Euler step
     _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, dydt0, diag0, mo_res0), xs=t_outer)
     timer.finalize()
 

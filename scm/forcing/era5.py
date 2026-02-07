@@ -11,7 +11,7 @@ from scm import consts, convert
 from scm.forcing.interp import get_ts_interp_fn
 from scm.mo import MOSettings
 from scm.grid import StaggeredGrid
-from scm.interfaces import Simulation, TransientForcing
+from scm.interfaces import Simulation, Forcing
 from scm.io import era5
 from scm.io.cache import XRCache
 from scm.mynn.interfaces import ProgVarsMYNN
@@ -154,7 +154,7 @@ def get_era5_sim(
     f_c = 2 * 7.2921e-5 * jnp.sin(jnp.deg2rad(lat_deg))
 
     # Gather forcing in TransientForcing
-    frc = TransientForcing(
+    frc = Forcing(
         u_geo=u_geo_fn,
         v_geo=v_geo_fn,
         th_s=t_s_fn,
