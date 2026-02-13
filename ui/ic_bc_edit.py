@@ -1,18 +1,17 @@
 import abc
+import enum
 from typing import Literal, Tuple
-import jax.numpy as jnp
 
 import bokeh.plotting as bp
+import jax.numpy as jnp
+import numpy as np
 from bokeh.layouts import column, row
 from bokeh.models import Button, ColumnDataSource, PointDrawTool, RadioButtonGroup, DataTable, TableColumn
-import numpy as np
-import enum
+from scipy.interpolate import CubicSpline
 
+from scm.forcing.interp import get_ts_interp_fn
 from scm.interfaces import Forcing
 from scm.mynn.interfaces import ProgVarsMYNN
-from scm.forcing.interp import get_ts_interp_fn
-
-from scipy.interpolate import CubicSpline
 
 
 class InterpType(enum.StrEnum):
@@ -258,7 +257,7 @@ class BCEditor(Editor):
 
 
 class MYNNEditor:
-    def __init__(self, H: int, Nz: int):
+    def __init__(self, H: float, Nz: int):
         z = np.linspace(0, H, Nz)
         time_h = np.linspace(0, 24, 100)  # hours of simulation time
         self.ics = {
@@ -296,7 +295,7 @@ class MYNNEditor:
                 return lambda t_s: data  # constant forcing in time
             elif mode == "bc":
                 data = jnp.array(self.bcs[name].interpolate())
-                return get_ts_interp_fn(jnp.array(self.time_h), data)
+                return get_ts_interp_fn(time_s=jnp.array(self.time_h) * 3600, data=data)
             else:
                 raise ValueError(f"Unsupported mode: {mode}")
 

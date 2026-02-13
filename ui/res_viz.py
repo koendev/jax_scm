@@ -1,9 +1,10 @@
 from __future__ import annotations
+
+import bokeh.layouts as bl
+import bokeh.models as bm
+import bokeh.plotting as bp
 import numpy as np
 import xarray as xr
-import bokeh.plotting as bp
-import bokeh.models as bm
-import bokeh.layouts as bl
 
 WIDTH = 1200
 
