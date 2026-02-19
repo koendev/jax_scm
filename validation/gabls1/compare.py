@@ -48,9 +48,7 @@ def get_ref_ax(
 
 
 if __name__ == "__main__":
-    # res_file = pathlib.Path("out_64.nc")
-    # res_file = pathlib.Path("out_128.nc")
-    res_file = pathlib.Path("out_400.nc")
+    res_file = pathlib.Path("out_64.nc")
     res = xr.open_dataset(res_file)
 
     t_min = res["time"] * 60  # hours to minutes

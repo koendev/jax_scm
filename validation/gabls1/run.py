@@ -1,19 +1,16 @@
-import jax
 import jax.numpy as jnp
-
 import matplotlib.pyplot as plt
 
-from scm.interfaces import Simulation, TransientForcing
-from scm.mynn.interfaces import ProgVarsMYNN
-from scm.mynn.model import init_model
 from scm.grid import StaggeredGrid
-from scm.time_stepping import simulate_adaptive_dt
-from scm.mo import MOSettings, BusingerDyerAltSimFuncs
-
+from scm.interfaces import Simulation, Forcing
 from scm.io.local import make_dataset
+from scm.mo import MOSettings, BusingerDyerAltSimFuncs
+from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
+from scm.mynn.model import init_model
+from scm.time_stepping import simulate_cn
 
 
-def get_gabls1(Nz: int = 64, plot: bool = False, random_seed: int = 0) -> Simulation[ProgVarsMYNN]:
+def get_gabls1(Nz: int = 64, plot: bool = False, random_seed: int = 0) -> Simulation[ProgVarsMYNN, DiagVarsMYNN]:
     """Get a GABLS1 simulation setup.
 
     References
@@ -39,7 +36,7 @@ def get_gabls1(Nz: int = 64, plot: bool = False, random_seed: int = 0) -> Simula
     # No moisture
     w_qv_s = lambda t_s: jnp.array(0.0)  # g/kg m/s
 
-    forcing = TransientForcing(
+    forcing = Forcing(
         u_geo=lambda t_s: ug,
         v_geo=lambda t_s: vg,
         f_c=1.39e-4,  # 1/s, ~73 deg latitude
@@ -117,14 +114,12 @@ def get_gabls1(Nz: int = 64, plot: bool = False, random_seed: int = 0) -> Simula
 
 
 if __name__ == "__main__":
-    sim = get_gabls1(Nz=400, plot=True)
-    model = init_model(sim)
-    state_hist, diag_hist, mo_hist, t = simulate_adaptive_dt(
+    sim = get_gabls1(Nz=64, plot=False)
+    model = init_model(sim, implicit=True)
+    state_hist, diag_hist, mo_hist, t = simulate_cn(
         model=model,
         sim=sim,
-        dt_s_init=0.001,
-        dt_s_max=1,
-        cfl_max=0.05,
+        dt_s=2,
         dt_s_out=60 * 5,
     )
 
