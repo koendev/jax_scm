@@ -3,13 +3,15 @@ import jax.random
 import matplotlib.pyplot as plt
 
 from scm import consts
-from scm.mo import MOSettings
-from scm.mynn.interfaces import ProgVarsMYNN
+from scm.mo import MOSettings, BusingerDyerAltSimFuncs
+from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
 from scm.grid import StaggeredGrid
-from scm.interfaces import TransientForcing, Simulation
+from scm.interfaces import Forcing, Simulation
 
 
-def get_gabls1(Nz: int = 128, plot: bool = False, random_seed: int = 0) -> Simulation[ProgVarsMYNN]:
+def get_gabls1(
+    Nz: int = 128, plot: bool = False, random_seed: int = 0
+) -> Simulation[ProgVarsMYNN, DiagVarsMYNN]:
     ## Grid
     grid = StaggeredGrid(H=400, Nz=Nz)
     z_inv = 100
@@ -23,12 +25,19 @@ def get_gabls1(Nz: int = 128, plot: bool = False, random_seed: int = 0) -> Simul
     th_s_0 = 263.5  # K
     th_s_fn = lambda t_s: th_s_0 - 0.25 * t_s / (60 * 60)  # K, 0.25 K per hour cooling
 
-    forcing = TransientForcing(
+    forcing = Forcing(
         u_geo=lambda t_s: ug,
         v_geo=lambda t_s: vg,
         f_c=1.39e-4,  # 1/s, ~73 deg latitude
         th_s=th_s_fn,
         w_qv_s=lambda t_s: jnp.array(0.0),  # g/kg m/s
+    )
+
+    ## MO settings
+    mo_settings = MOSettings(
+        z0m=0.1,
+        z0h=0.1,
+        sim_funcs=BusingerDyerAltSimFuncs(gamma_m=16, gamma_h=16, b_m=4.8, b_h=7.8),
     )
 
     ## Initial conditions
@@ -47,7 +56,7 @@ def get_gabls1(Nz: int = 128, plot: bool = False, random_seed: int = 0) -> Simul
     tke = jnp.zeros(grid.Nz)
     tke = jnp.where(grid.z < 250, 0.4 * (1 - grid.z / 250) ** 3, tke)  # m^2 s^-2
 
-    init = ProgVarsMYNN(u=u, v=v, thv=th, qke=2 * tke)
+    init = ProgVarsMYNN(u=u, v=v, th=th, qv=jnp.zeros(grid.Nz), qke=2 * tke)
 
     ## Surface model (not in use)
     # z0m = z0h = 0.1  # m, roughness lengths for momentum and heat
@@ -91,10 +100,18 @@ def get_gabls1(Nz: int = 128, plot: bool = False, random_seed: int = 0) -> Simul
 
         fig.show()
 
-    return Simulation(name="GABLS1", grid=grid, init=init, forcing=forcing, t_start_s=0, t_end_s=9 * 60 * 60)
+    return Simulation(
+        name="GABLS1",
+        grid=grid,
+        init=init,
+        forcing=forcing,
+        mo_settings=mo_settings,
+        t_start_s=0,
+        t_end_s=9 * 60 * 60,
+    )
 
 
-def get_ysu(Nz: int = 138, plot: bool = False) -> Simulation[ProgVarsMYNN]:
+def get_ysu(Nz: int = 138, plot: bool = False) -> Simulation[ProgVarsMYNN, DiagVarsMYNN]:
     """Initial conditions and forcing from HND06
 
     Use debug_dt to shift the time of the forcing functions for debugging purposes.
@@ -112,8 +129,6 @@ def get_ysu(Nz: int = 138, plot: bool = False) -> Simulation[ProgVarsMYNN]:
     q = jnp.where(grid.z > 1500, 5.0, q)  # constant above 1500m
     q = q / 1000
 
-    thv = th * (1 + 0.61 * q)  # virtual potential temperature
-
     u = jnp.ones(grid.Nz) * 15.0  # m/s
     u = jnp.where(grid.z < z_inv, (15 / 500) * grid.z, u)  # linear increase to 15 m/s at z_inv
 
@@ -122,7 +137,8 @@ def get_ysu(Nz: int = 138, plot: bool = False) -> Simulation[ProgVarsMYNN]:
     init = ProgVarsMYNN(
         u=u,
         v=v,
-        thv=thv,
+        th=th,
+        qv=q,
         qke=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
     )
 
@@ -153,7 +169,7 @@ def get_ysu(Nz: int = 138, plot: bool = False) -> Simulation[ProgVarsMYNN]:
         """Constant geostrophic wind."""
         return jnp.zeros(grid.Nz)
 
-    forcing = TransientForcing(u_geo=_u_geo, v_geo=_v_geo, f_c=1.39e-4, w_th_s=_shfx, w_qv_s=_lhfx)
+    forcing = Forcing(u_geo=_u_geo, v_geo=_v_geo, f_c=1.39e-4, w_th_s=_shfx, w_qv_s=_lhfx)
 
     if plot:
         # Initial conditions
@@ -163,10 +179,10 @@ def get_ysu(Nz: int = 138, plot: bool = False) -> Simulation[ProgVarsMYNN]:
         ax_uv.set_xlabel("Wind (m/s)")
         ax_uv.set_ylabel("Height (m)")
         ax_uv.legend()
-        ax_th.plot(init.thv, grid.z)
+        ax_th.plot(init.th, grid.z)
         ax_th.set_xlabel("Potential Temperature (K)")
-        # ax_q.plot(init.q * 1000, grid.z)
-        # ax_q.set_xlabel("Specific Humidity (g/kg)")
+        ax_q.plot(init.qv * 1000, grid.z)
+        ax_q.set_xlabel("Specific Humidity (g/kg)")
         fig.show()
 
         # Forcing plots
@@ -182,17 +198,25 @@ def get_ysu(Nz: int = 138, plot: bool = False) -> Simulation[ProgVarsMYNN]:
         ax_lhfx.set_ylabel("Surface Latent Heat Flux (W/m²)")
         fig.show()
 
-    return Simulation(name="YSU", grid=grid, init=init, forcing=forcing, t_start_s=0, t_end_s=12 * 3600)
+    return Simulation(
+        name="YSU",
+        grid=grid,
+        init=init,
+        forcing=forcing,
+        mo_settings=MOSettings(z0m=0.1, z0h=0.1),
+        t_start_s=0,
+        t_end_s=12 * 3600,
+    )
 
 
-def get_ekman(Nz: int = 100, plot: bool = False) -> Simulation[ProgVarsMYNN]:
+def get_ekman(Nz: int = 100, plot: bool = False) -> Simulation[ProgVarsMYNN, DiagVarsMYNN]:
     """Ekman spiral initial conditions and forcing."""
     grid = StaggeredGrid(H=1000, Nz=Nz)
 
     ug = 10.0 * jnp.ones(grid.Nz)
     vg = jnp.zeros(grid.Nz)
 
-    forcing = TransientForcing(
+    forcing = Forcing(
         u_geo=lambda t: ug,
         v_geo=lambda t: vg,
         f_c=1e-4,
@@ -206,7 +230,8 @@ def get_ekman(Nz: int = 100, plot: bool = False) -> Simulation[ProgVarsMYNN]:
     init = ProgVarsMYNN(
         u=ug.copy(),
         v=vg.copy(),
-        thv=thv,
+        th=thv,
+        qv=jnp.zeros(grid.Nz),
         qke=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
     )
 
@@ -217,7 +242,7 @@ def get_ekman(Nz: int = 100, plot: bool = False) -> Simulation[ProgVarsMYNN]:
         ax_uv.set_xlabel("Wind (m/s)")
         ax_uv.set_ylabel("Height (m)")
         ax_uv.legend()
-        ax_th.plot(init.thv, grid.z)
+        ax_th.plot(init.th, grid.z)
         ax_th.set_xlabel("Potential Temperature (K)")
         fig.show()
 
@@ -226,12 +251,13 @@ def get_ekman(Nz: int = 100, plot: bool = False) -> Simulation[ProgVarsMYNN]:
         grid=grid,
         init=init,
         forcing=forcing,
+        mo_settings=MOSettings(z0m=0.1, z0h=0.1),
         t_start_s=0,
         t_end_s=12 * 3600,
     )
 
 
-def get_wangara(Nz: int = 50, plot: bool = False) -> Simulation[ProgVarsMYNN]:
+def get_wangara(Nz: int = 50, plot: bool = False) -> Simulation[ProgVarsMYNN, DiagVarsMYNN]:
     """Wangara initial conditions and forcing."""
     import pandas as pd
 
@@ -251,7 +277,7 @@ def get_wangara(Nz: int = 50, plot: bool = False) -> Simulation[ProgVarsMYNN]:
     )
     v_g = jnp.zeros(grid.Nz)
 
-    forcing = TransientForcing(
+    forcing = Forcing(
         u_geo=lambda t_s: u_g,
         v_geo=lambda t_s: v_g,
         f_c=1.39e-4,

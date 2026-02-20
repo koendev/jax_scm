@@ -42,6 +42,10 @@ class Namelist(pydantic.BaseModel):
             warnings.warn("Implicit time stepping set, ignoring adaptive_timestep config.")
         return self
 
+    @property
+    def is_implicit(self) -> bool:
+        return self.time_int == TimeIntMethod.IMPLICIT
+
 
 class AdaptiveTimestepConfig(pydantic.BaseModel):
     cfl_max: float = 0.5  # Max CFL number for diffusion

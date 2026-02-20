@@ -2,69 +2,66 @@ from __future__ import annotations
 
 import logging
 
-import jax.experimental.checkify
+import jax
 import numpy as np
 
 import cases
-from scm.grid import StaggeredGrid
+from scm.config import Namelist
 from scm.forcing.era5 import get_era5_sim  # noqa
 from scm.forcing.interp import interp_dtindex
 from scm.io.local import make_dataset
 from scm.mynn.model import init_model
-from scm.time_stepping import simulate_adaptive_dt
+from scm.time_stepping import simulate
 
 # jax.config.update("jax_disable_jit", True)
 jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax_platforms", "cpu")
 jax.config.update("jax_debug_nans", True)
 
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("scm")
 
 if __name__ == "__main__":
     # Ekman spiral
-    # grid, init, forcing = cases.get_ekman(Nz=100)
+    # sim = cases.get_ekman(Nz=100)
 
     # YSU test case
-    # t_debug = 0
-    # grid, init, forcing = cases.get_ysu()
+    # sim = cases.get_ysu()
 
     # GABLS
     # sim = cases.get_gabls1(Nz=64)
 
     # Wangara
-    # sim = cases.get_wangara(Nz=50)
+    sim = cases.get_wangara(Nz=200)
 
     # Cabauw from ERA5
-    sim = get_era5_sim(
-        name="Cabauw_Test",
-        lat_deg=52.0,
-        lon_deg=5.0,
-        grid=StaggeredGrid(Nz=200, H=4000.0),
-        # time_slice=slice("2025-07-01", "2025-07-03"),
-        time_slice="2025-07-01",
-        source="google",
+    # sim = get_era5_sim(
+    #     name="Cabauw_Test",
+    #     lat_deg=52.0,
+    #     lon_deg=5.0,
+    #     grid=StaggeredGrid(Nz=200, H=4000.0),
+    #     # time_slice=slice("2025-07-01", "2025-07-03"),
+    #     time_slice="2025-07-01",
+    #     source="google",
+    # )
+
+    cfg_ab2 = Namelist(
+        time_int="explicit",
+        dt_s=0.001,
+        dt_s_out=300.0,
+        adaptive_timestep=dict(cfl_max=0.05, dt_s_max=1.0),
     )
 
-    # Init and run model
-    model = init_model(sim)
-    # state_hist, diag_hist, mo_hist, t = simulate(
-    #     model,
-    #     init,
-    #     forcing,
-    #     dt_s=0.001,
-    #     t_start_s=9 * 60 * 60,
-    #     t_end_s=16 * 60 * 60,
-    #     dt_out_s=60 * 5,
-    # )
-    state_hist, diag_hist, mo_hist, t = simulate_adaptive_dt(
-        model=model,
-        sim=sim,
-        dt_s_init=0.001,
-        dt_s_max=1,
-        cfl_max=0.05,
-        dt_s_out=60 * 5,
+    cfg_cn = Namelist(
+        time_int="implicit",
+        dt_s=0.5,
+        dt_s_out=300.0,
     )
+    cfg = cfg_ab2
+
+    # Init and run model
+    model = init_model(sim, implicit=cfg.is_implicit)
+    state_hist, diag_hist, mo_hist, t = simulate(model=model, sim=sim, cfg=cfg)
 
     # Prepare time axis
     if sim.t_index is not None:
