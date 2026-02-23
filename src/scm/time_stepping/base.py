@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Tuple, Callable
 
 import jax
 from jax import numpy as jnp
@@ -10,242 +10,89 @@ from scm.config import Namelist
 from scm.time_stepping.explicit import get_euler_step_fn, get_ab2_step_fn
 from scm.time_stepping.implicit import get_cn_step_fn
 from scm.time_stepping.utils import IterationTimer
+from scm.mo import MOResult
 
 
 def simulate(model: ModelFn, sim: Simulation, cfg: Namelist) -> Output[ProgVarsT, DiagVarsT]:
+    """Unified simulation entry point with a single outer loop."""
     print("Config:", cfg)
 
-    if cfg.time_int == "explicit":
-        if cfg.adaptive_timestep is not None:
-            # AB2 with adaptive time stepping
-            return simulate_ab2_adaptive(
-                model=model,
-                sim=sim,
-                cfl_max=cfg.adaptive_timestep.cfl_max,
-                dt_s_init=cfg.dt_s,
-                dt_s_max=cfg.adaptive_timestep.dt_s_max,
-                dt_s_out=cfg.dt_s_out,
-            )
-        else:
-            # AB2 with fixed time stepping
-            return simulate_ab2_fixed(
-                model=model,
-                sim=sim,
-                dt_s=cfg.dt_s,
-                dt_s_out=cfg.dt_s_out,
-            )
-    elif cfg.time_int == "implicit":
-        # Semi-implicit CN
-        return simulate_cn(
-            model=model,
-            sim=sim,
-            dt_s=cfg.dt_s,
-            dt_s_out=cfg.dt_s_out,
-        )
+    # Prepare time coordinates
+    t_outer = jnp.arange(sim.t_start_s, sim.t_end_s, cfg.dt_s_out)
+    timer = IterationTimer(n_total=len(t_outer))
+
+    # Configure the time integration stepper
+    if cfg.time_int == "explicit" and cfg.adaptive_timestep is not None:
+        # Adaptive AB2 stepper
+        _warmup = get_euler_step_fn(model)
+        _ab2 = get_ab2_step_fn(model)
+
+        def _get_dt(diag):
+            K_max = jnp.clip(jnp.maximum(jnp.max(diag.Km), jnp.max(diag.Kh)), min=1e-6)
+            dt = cfg.adaptive_timestep.cfl_max * sim.grid.dz**2 / K_max
+            return jnp.minimum(dt, cfg.adaptive_timestep.dt_s_max)
+
+        def _step_fn(carry, t, dt_out):
+            def _while_body(c):
+                y, prev, diag, mo, i, t_curr, t_left = c
+                dt = jnp.minimum(_get_dt(diag), t_left)
+                y_n, prev_n, diag_n, mo_n = _ab2(t_curr, dt, y, prev)
+                return y_n, prev_n, diag_n, mo_n, i + 1, t_curr + dt, t_left - dt
+
+            loop_init = (*carry, 0, t.astype(float), dt_out)
+            loop_final = jax.lax.while_loop(lambda c: c[-1] > 0, _while_body, loop_init)
+            *new_carry, i, _, _ = loop_final
+            jax.debug.print("Took {i} steps", i=i)
+            return tuple(new_carry), tuple(new_carry)
+
     else:
-        raise ValueError(f"Invalid time_int: {cfg.time_int}")
+        # Fixed-timestep (AB2 or CN)
+        if cfg.time_int == "explicit":
+            _warmup = get_euler_step_fn(model)
+            _step = get_ab2_step_fn(model)
+        else:
+            _warmup, _step = get_cn_step_fn(model, sim.grid)
 
+        rel_t_inner = jnp.arange(0, cfg.dt_s_out, cfg.dt_s) + cfg.dt_s
 
-def simulate_ab2_fixed(
-    model: ModelFn,
-    sim: Simulation,
-    dt_s: float,
-    dt_s_out: float,
-) -> Output[ProgVarsT, DiagVarsT]:
-    """Simulate model with AB2 and constant timestep."""
-    # Setup time integration
-    _euler = get_euler_step_fn(model)
-    _ab2 = get_ab2_step_fn(model)
+        def _step_fn(carry, t, dt_out):
+            def _scan_inner(c, t_in):
+                y, prev, _, _ = c
+                return _step(t_in, cfg.dt_s, y, prev), None
 
-    # Setup timestep arrays
-    # Inner steps shifted by dt because initial Euler step is taken outside loop
-    t_outer = jnp.arange(sim.t_start_s, sim.t_end_s, dt_s_out)
-    rel_t_inner = jnp.arange(0, dt_s_out, dt_s) + dt_s  # relative to outer step
-    print(
-        f"Inner steps: {len(rel_t_inner)}, "
-        f"Outer steps: {len(t_outer)}, "
-        f"Total steps: {len(t_outer) * len(rel_t_inner)}"
-    )
-    timer = IterationTimer(n_total=len(t_outer))
+            new_carry, _ = jax.lax.scan(_scan_inner, init=carry, xs=t + rel_t_inner)
+            return new_carry, new_carry
 
-    def _scan_inner(carry, t):
-        """Advance model by one step but don't accumulate outputs"""
-        y1, dydt0, _, _ = carry
-        y2, dydt1, diag1, mo_res1 = _ab2(t, dt_s, y1, dydt0)
-        return (y2, dydt1, diag1, mo_res1), None
-
-    def _scan_outer(carry, t):
-        """Advance model by inner steps and accumulate outputs"""
-        carry_new, _ = jax.lax.scan(_scan_inner, init=carry, xs=t + rel_t_inner)
-        jax.debug.callback(timer.callback, t + dt_s_out)
-        return carry_new, carry_new
-
+    # Run the simulation loop
     jax.debug.print("Begin simulation...")
-    y0 = sim.init
-    y1, dydt0, diag0, mo_res0 = _euler(t_outer[0], dt_s, y0)  # Warmup: one Euler step
-    _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, dydt0, diag0, mo_res0), xs=t_outer)
+    y1, prev0, diag0, mo0 = _warmup(t_outer[0], cfg.dt_s, sim.init)
+
+    def _outer_body(carry, t):
+        new_carry, out = _step_fn(carry, t, cfg.dt_s_out)
+        jax.debug.callback(timer.callback, t + cfg.dt_s_out)
+        return new_carry, out
+
+    _, history = jax.lax.scan(_outer_body, init=(y1, prev0, diag0, mo0), xs=t_outer)
     timer.finalize()
 
-    # Prepend initial state
-    state_traj = jax.tree_util.tree_map(lambda y0_f, yh_f: jnp.concatenate([y0_f[None, ...], yh_f]), y0, y_hist)
-    diag_traj = jax.tree_util.tree_map(lambda d0_f, dh_f: jnp.concatenate([d0_f[None, ...], dh_f]), diag0, diag_hist)
-    mo_traj = jax.tree_util.tree_map(lambda m0_f, mh_f: jnp.concatenate([m0_f[None, ...], mh_f]), mo_res0, mo_hist)
-    t_s = jnp.concatenate([jnp.array([sim.t_start_s]), t_outer + dt_s_out])
+    # Assemble Output by merging the initial state with the trajectory
+    y_h, _, diag_h, mo_h = history
 
-    return Output(
-        state_traj=state_traj,
-        diag_traj=diag_traj,
-        mo_traj=mo_traj,
-        t_s=t_s,
+    # Initial state (t=0) as an Output object
+    out0 = Output(
+        state_traj=jax.tree_util.tree_map(lambda x: x[None], sim.init),
+        diag_traj=jax.tree_util.tree_map(lambda x: x[None], diag0),
+        mo_traj=jax.tree_util.tree_map(lambda x: x[None], mo0),
+        t_s=jnp.array([sim.t_start_s]),
     )
 
-
-def simulate_ab2_adaptive(
-    model: ModelFn,
-    sim: Simulation,
-    cfl_max: float,
-    dt_s_init: float,
-    dt_s_max: float,
-    dt_s_out: float,
-) -> Output[ProgVarsT, DiagVarsT]:
-    """Simulate model with AB2 and adaptive time stepping based on CFL condition for diffusion."""
-    # Setup time integration
-    _euler = get_euler_step_fn(model)
-    _ab2 = get_ab2_step_fn(model)
-
-    # Setup outer loop and timer
-    t_outer = jnp.arange(sim.t_start_s, sim.t_end_s, dt_s_out)
-    timer = IterationTimer(n_total=len(t_outer))
-
-    def _get_dt(Km: jnp.ndarray, Kh: jnp.ndarray) -> jnp.ndarray:
-        """Compute adaptive timestep based on CFL condition for diffusion."""
-        Km_max = jnp.max(Km)
-        Kh_max = jnp.max(Kh)
-        K_max = jnp.clip(jnp.maximum(Km_max, Kh_max), min=1e-6)  # avoid zero division
-        dt = cfl_max * sim.grid.dz**2 / K_max
-
-        return jnp.minimum(dt, dt_s_max)
-
-    def _while_body(carry):
-        """Advance model by one adaptive step"""
-        # Unpack previous state
-        y1, dydt0, diag0, _, i, t, t_left = carry
-
-        # Compute adaptive timestep. Make sure we always finish for dt_out_s.
-        dt_s = jnp.minimum(_get_dt(Km=diag0.Km, Kh=diag0.Kh), t_left)
-
-        # Integrate one step
-        y2, dydt1, diag1, mo_res1 = _ab2(t, dt_s, y1, dydt0)
-
-        # Advance time
-        t_left = t_left - dt_s
-        t = t + dt_s
-        i = i + 1
-
-        return y2, dydt1, diag1, mo_res1, i, t, t_left
-
-    def _while_cond(carry):
-        """Condition for adaptive stepping loop"""
-        *_, t_left = carry
-        return t_left > 0
-
-    def _scan_outer(carry, t):
-        """Advance model by inner steps and accumulate outputs"""
-        carry = (*carry, 0, t.astype(float), dt_s_out)  # Expand carry for while loop
-        carry_new = jax.lax.while_loop(_while_cond, _while_body, carry)
-        *carry_new, i, _, _ = carry_new  # unpack carry
-        jax.debug.callback(timer.callback, t + dt_s_out)
-        jax.debug.print("Took {i} steps with average dt={dt_s:.4f}s", i=i, dt_s=dt_s_out / i)
-        return tuple(carry_new), tuple(carry_new)
-
-    jax.debug.print("Begin simulation...")
-    y0 = sim.init
-    y1, dydt0, diag0, mo_res0 = _euler(t_outer[0], dt_s_init, y0)  # Warmup: one Euler step
-    _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, dydt0, diag0, mo_res0), xs=t_outer)
-    timer.finalize()
-
-    # Prepend initial state
-    state_traj = jax.tree_util.tree_map(lambda y0_f, yh_f: jnp.concatenate([y0_f[None, ...], yh_f]), y0, y_hist)
-    diag_traj = jax.tree_util.tree_map(lambda d0_f, dh_f: jnp.concatenate([d0_f[None, ...], dh_f]), diag0, diag_hist)
-    mo_traj = jax.tree_util.tree_map(lambda m0_f, mh_f: jnp.concatenate([m0_f[None, ...], mh_f]), mo_res0, mo_hist)
-    t_s = jnp.concatenate([jnp.array([sim.t_start_s]), t_outer + dt_s_out])
-
-    return Output(
-        state_traj=state_traj,
-        diag_traj=diag_traj,
-        mo_traj=mo_traj,
-        t_s=t_s,
+    # Simulation results (t > 0) as an Output object
+    out_h = Output(
+        state_traj=y_h,
+        diag_traj=diag_h,
+        mo_traj=mo_h,
+        t_s=t_outer + cfg.dt_s_out,
     )
 
-
-def simulate_cn(
-    model: ModelFn,
-    sim: Simulation,
-    dt_s: float,
-    dt_s_out: float,
-) -> Output[ProgVarsT, DiagVarsT]:
-    """Simulate model with semi-implicit Crank-Nicolson diffusion and AB2 explicit sources.
-
-    Diffusion terms are solved implicitly (K fixed per step); non-diffusive
-    terms (Coriolis, QKE production/dissipation, large-scale advection) use
-    AB2 extrapolation. The ``model`` must be initialized with ``implicit=True``.
-
-    Parameters
-    ----------
-    model : ModelFn
-        MYNN model function (initialized with ``implicit=True``).
-    sim : Simulation
-        Simulation container (provides initial state and time bounds).
-    dt_s : float
-        Inner time step [s].
-    dt_s_out : float
-        Output interval [s]; must be a multiple of ``dt_s``.
-
-    Returns
-    -------
-    y_hist, diag_hist, mo_hist, t_outer
-        History arrays sampled at ``dt_s_out`` intervals.
-    """
-    _cn_warmup, _cn = get_cn_step_fn(model, sim.grid)
-
-    # Setup timestep arrays (same layout as simulate())
-    t_outer = jnp.arange(sim.t_start_s, sim.t_end_s, dt_s_out)
-    rel_t_inner = jnp.arange(0, dt_s_out, dt_s) + dt_s  # relative to outer step, shifted by dt
-    print(
-        f"Inner steps: {len(rel_t_inner)}, "
-        f"Outer steps: {len(t_outer)}, "
-        f"Total steps: {len(t_outer) * len(rel_t_inner)}"
-    )
-    timer = IterationTimer(n_total=len(t_outer))
-
-    def _scan_inner(carry, t):
-        """Advance model by one CN step without accumulating output."""
-        y1, S_prev, _, _ = carry
-        y2, S1, diag1, mo_res1 = _cn(t, dt_s, y1, S_prev)
-        return (y2, S1, diag1, mo_res1), None
-
-    def _scan_outer(carry, t):
-        """Advance model by inner steps and accumulate output."""
-        carry_new, _ = jax.lax.scan(_scan_inner, init=carry, xs=t + rel_t_inner)
-        jax.debug.callback(timer.callback, t + dt_s_out)
-        return carry_new, carry_new
-
-    jax.debug.print("Begin simulation (CN)...")
-    y0 = sim.init
-    # Warmup: one CN step with S_prev = S^0 (first-order accurate at startup)
-    y1, S0, diag0, mo_res0 = _cn_warmup(t_outer[0], dt_s, y0)
-    _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, S0, diag0, mo_res0), xs=t_outer)
-    timer.finalize()
-
-    # Prepend initial state
-    state_traj = jax.tree_util.tree_map(lambda y0_f, yh_f: jnp.concatenate([y0_f[None, ...], yh_f]), y0, y_hist)
-    diag_traj = jax.tree_util.tree_map(lambda d0_f, dh_f: jnp.concatenate([d0_f[None, ...], dh_f]), diag0, diag_hist)
-    mo_traj = jax.tree_util.tree_map(lambda m0_f, mh_f: jnp.concatenate([m0_f[None, ...], mh_f]), mo_res0, mo_hist)
-    t_s = jnp.concatenate([jnp.array([sim.t_start_s]), t_outer + dt_s_out])
-
-    return Output(
-        state_traj=state_traj,
-        diag_traj=diag_traj,
-        mo_traj=mo_traj,
-        t_s=t_s,
-    )
+    # Merge initial state with trajectory
+    return jax.tree_util.tree_map(lambda a, b: jnp.concatenate([a, b]), out0, out_h)
