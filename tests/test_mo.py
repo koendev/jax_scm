@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from scm.mo import init_mo_sfc, BusingerDyerSimFuncs, MOResult
+from scm.mo import init_mo_sfc, BusingerDyerSimFuncs, MOResult, MOSettings
 
 
 # jax.config.update("jax_disable_jit", True)
@@ -39,6 +39,24 @@ def use_jit(request):
 
     # Restore original setting after test completes
     jax.config.update("jax_disable_jit", original)
+
+
+@pytest.fixture
+def mo_settings() -> MOSettings:
+    """Fixture for MO settings serialization test."""
+    sf = BusingerDyerSimFuncs(b=10, gamma=10)
+    return MOSettings(z0m=0.1, z0h=0.01, sim_funcs=sf)
+
+
+def test_serialize_settings(mo_settings):
+    """Test that MOSettings can be serialized and deserialized without errors."""
+    serialized = mo_settings.serialize()
+    deserialized = MOSettings.deserialize(serialized)
+    assert mo_settings.z0m == deserialized.z0m
+    assert mo_settings.z0h == deserialized.z0h
+    assert isinstance(deserialized.sim_funcs, BusingerDyerSimFuncs)
+    assert deserialized.sim_funcs.b_h == mo_settings.sim_funcs.b_h
+    assert deserialized.sim_funcs.gamma_h == mo_settings.sim_funcs.gamma_h
 
 
 def test_bd(use_jit):

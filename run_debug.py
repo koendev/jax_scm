@@ -9,7 +9,7 @@ import cases
 from scm.config import Namelist
 from scm.forcing.era5 import get_era5_sim  # noqa
 from scm.forcing.interp import interp_dtindex
-from scm.io.local import make_dataset
+from scm.io.local import out_to_ds
 from scm.mynn.model import init_model
 from scm.time_stepping import simulate
 
@@ -70,6 +70,6 @@ if __name__ == "__main__":
         time = t / 3600.0  # convert to hours
 
     # Save output
-    ds = make_dataset(out=out, sim=sim, time=out.t_s / 60 / 60)
+    ds = out_to_ds(out=out, sim=sim, time=out.t_s / 60 / 60)
     ds.to_netcdf("out.nc")
     print("Written to disk.")

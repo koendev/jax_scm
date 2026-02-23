@@ -3,10 +3,12 @@ from __future__ import annotations
 import abc
 import dataclasses
 import logging
-from typing import Callable, Tuple, Literal, Protocol
+from typing import Callable, Tuple, Literal, Protocol, Self, Dict
 
 import jax
+import importlib
 import jax.numpy as jnp
+from scm.config import yaml
 
 from scm import consts
 from scm import convert as conv
@@ -28,6 +30,19 @@ class MOSettings:
     @property
     def mh_ratio(self):
         return self.z0m / self.z0h
+
+    def serialize(self) -> str:
+        """Serialize MOSettings to a YAML string.
+        Use yaml because it automatically serializes similarity functions with parameters.
+        """
+        self_dict = dataclasses.asdict(self)
+        self_str = yaml.dict_to_yaml(self_dict)
+        return self_str
+
+    @classmethod
+    def deserialize(cls, mo_str: str) -> Self:
+        data = yaml.yaml_to_dict(mo_str)
+        return cls(**data)
 
 
 @jax.tree_util.register_dataclass

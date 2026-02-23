@@ -14,7 +14,7 @@ from scm.grid import StaggeredGrid
 from scm.time_stepping.base import simulate_adaptive_dt
 from scm.mo import MOSettings, BusingerDyerAltSimFuncs
 
-from scm.io.local import make_dataset
+from scm.io.local import out_to_ds
 
 
 def expand_array(a: jnp.ndarray, z_mask: jnp.ndarray, Nt: int, Nz: int) -> jnp.ndarray:
@@ -275,6 +275,6 @@ if __name__ == "__main__":
     )
 
     # Save output
-    ds = make_dataset(state_hist, diag_hist, mo_hist, time=t / 60 / 60, grid=sim.grid)
+    ds = out_to_ds(state_hist, diag_hist, mo_hist, time=t / 60 / 60, grid=sim.grid)
     ds.to_netcdf(f"out_{sim.grid.Nz}.nc")
     print("Written to disk.")

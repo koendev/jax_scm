@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 from scm.grid import StaggeredGrid
 from scm.interfaces import Simulation, Forcing
-from scm.io.local import make_dataset
+from scm.io.local import out_to_ds
 from scm.mo import MOSettings, BusingerDyerAltSimFuncs
 from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
 from scm.mynn.model import init_model
@@ -121,6 +121,6 @@ if __name__ == "__main__":
     out = simulate(model=model, sim=sim, cfg=cfg)
 
     # Save output
-    ds = make_dataset(out=out, sim=sim, time=out.t_s / 60 / 60)
+    ds = out_to_ds(out=out, sim=sim, time=out.t_s / 60 / 60)
     ds.to_netcdf(f"out_{sim.grid.Nz}.nc")
     print("Written to disk.")
