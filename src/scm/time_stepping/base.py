@@ -5,12 +5,12 @@ from typing import Tuple
 import jax
 from jax import numpy as jnp
 
-from scm.interfaces import Simulation, ProgVarsT, DiagVarsT, ModelFn
-from scm.mo import MOResult
-from scm.config import Namelist
-from scm.time_stepping.explicit import get_euler_step_fn, get_ab2_step_fn
-from scm.time_stepping.implicit import get_cn_step_fn
-from scm.time_stepping.utils import IterationTimer
+from src.scm.interfaces import Simulation, ProgVarsT, DiagVarsT, ModelFn
+from src.scm.mo import MOResult
+from src.scm.config import Namelist
+from src.scm.time_stepping.explicit import get_euler_step_fn, get_ab2_step_fn
+from src.scm.time_stepping.implicit import get_cn_step_fn
+from src.scm.time_stepping.utils import IterationTimer
 
 
 def simulate(

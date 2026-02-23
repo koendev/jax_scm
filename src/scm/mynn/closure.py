@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
-from scm import consts
-from scm import convert as conv
-from scm.grad import d_dz
-from scm.grid import StaggeredGrid
-from scm.interfaces import ClosureFn
-from scm.mo import MOResult
-from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
+from src.scm import consts
+from src.scm import convert as conv
+from src.scm.grad import d_dz
+from src.scm.grid import StaggeredGrid
+from src.scm.interfaces import ClosureFn
+from src.scm.mo import MOResult
+from src.scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
 
 # MYNN closure constants
 A1, A2, B1, B2, C1 = 1.18, 0.665, 24.0, 15.0, 0.137  # eq 66, NN09
@@ -100,7 +100,7 @@ def init_closure(grid: StaggeredGrid) -> ClosureFn[ProgVarsMYNN, DiagVarsMYNN]:
         # todo: check what this does
         G_M = L**2 / q**2 * (grads.u**2 + grads.v**2)  # eq 39, NN09
         # G_H = -(L**2) / q**2 * consts.g / th_0 * (beta_th * grads.th_l + beta_q * grads.q_w)  # eq 40, NN09
-        G_H = -(L**2) / q**2 * consts.g / th_0 * dthv_dz  # eq 40, NN09 (virt. pot. temp. version)
+        G_H = -(L**2) / q ** 2 * consts.g / th_0 * dthv_dz  # eq 40, NN09 (virt. pot. temp. version)
         Ri = -G_H / (G_M + g_m_min)  # above eq A11, NN09, gradient Richardson number
 
         ## Level-2 closure

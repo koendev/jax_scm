@@ -1739,6 +1739,71 @@ wheels = [
 ]
 
 [[package]]
+name = "jax-scm"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "bokeh" },
+    { name = "cftime" },
+    { name = "dask" },
+    { name = "flax" },
+    { name = "gcsfs" },
+    { name = "jax" },
+    { name = "jinja2" },
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "pydantic" },
+    { name = "pytest" },
+    { name = "pyyaml" },
+    { name = "scipy" },
+    { name = "seaborn" },
+    { name = "xarray" },
+    { name = "zarr" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "black" },
+    { name = "dvc" },
+    { name = "dvc-ssh" },
+    { name = "ipykernel" },
+    { name = "pandas-stubs" },
+    { name = "pip" },
+    { name = "scipy-stubs" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bokeh", specifier = ">=3.8.2" },
+    { name = "cftime", specifier = ">=1.6.5" },
+    { name = "dask", specifier = ">=2026.1.2" },
+    { name = "flax" },
+    { name = "gcsfs", specifier = ">=2026.1.0" },
+    { name = "jax", specifier = "==0.9.*" },
+    { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "matplotlib" },
+    { name = "pandas", specifier = ">=2.3.3" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "pytest", specifier = ">=9.0.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "scipy", specifier = ">=1.16.3" },
+    { name = "seaborn" },
+    { name = "xarray", specifier = ">=2026.1.0" },
+    { name = "zarr", specifier = ">=3.1.5" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "black" },
+    { name = "dvc", specifier = ">=3.64.1" },
+    { name = "dvc-ssh", specifier = ">=4.2.2" },
+    { name = "ipykernel", specifier = ">=7.1.0" },
+    { name = "pandas-stubs", specifier = "==2.3.3.*" },
+    { name = "pip", specifier = ">=25.3" },
+    { name = "scipy-stubs", specifier = "==1.16.*" },
+]
+
+[[package]]
 name = "jaxlib"
 version = "0.9.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3452,71 +3517,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/08/91/1700d2a1a9f64f19bb019a547e510b99a6af1fef49641a0bce86bc85fb8e/scipy_stubs-1.16.3.3.tar.gz", hash = "sha256:af47578875d5557567225a16ec1b9b38a48c4c4377d92396413ebd65406c44ee", size = 361468, upload-time = "2025-12-08T13:45:38.37Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7c/e2/3b8826f281f59301e3284989b19cfc56fdccf799134c1befedd38482a23a/scipy_stubs-1.16.3.3-py3-none-any.whl", hash = "sha256:f6316b36cd0fb272c994ae5b10c4a73c644a7e156ed8d32bcd9c35303d0e1b7e", size = 561750, upload-time = "2025-12-08T13:45:36.568Z" },
-]
-
-[[package]]
-name = "scm-hybrid"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "bokeh" },
-    { name = "cftime" },
-    { name = "dask" },
-    { name = "flax" },
-    { name = "gcsfs" },
-    { name = "jax" },
-    { name = "jinja2" },
-    { name = "matplotlib" },
-    { name = "pandas" },
-    { name = "pydantic" },
-    { name = "pytest" },
-    { name = "pyyaml" },
-    { name = "scipy" },
-    { name = "seaborn" },
-    { name = "xarray" },
-    { name = "zarr" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "black" },
-    { name = "dvc" },
-    { name = "dvc-ssh" },
-    { name = "ipykernel" },
-    { name = "pandas-stubs" },
-    { name = "pip" },
-    { name = "scipy-stubs" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "bokeh", specifier = ">=3.8.2" },
-    { name = "cftime", specifier = ">=1.6.5" },
-    { name = "dask", specifier = ">=2026.1.2" },
-    { name = "flax" },
-    { name = "gcsfs", specifier = ">=2026.1.0" },
-    { name = "jax", specifier = "==0.9.*" },
-    { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "matplotlib" },
-    { name = "pandas", specifier = ">=2.3.3" },
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pytest", specifier = ">=9.0.1" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "scipy", specifier = ">=1.16.3" },
-    { name = "seaborn" },
-    { name = "xarray", specifier = ">=2026.1.0" },
-    { name = "zarr", specifier = ">=3.1.5" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "black" },
-    { name = "dvc", specifier = ">=3.64.1" },
-    { name = "dvc-ssh", specifier = ">=4.2.2" },
-    { name = "ipykernel", specifier = ">=7.1.0" },
-    { name = "pandas-stubs", specifier = "==2.3.3.*" },
-    { name = "pip", specifier = ">=25.3" },
-    { name = "scipy-stubs", specifier = "==1.16.*" },
 ]
 
 [[package]]

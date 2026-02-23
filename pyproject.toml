@@ -1,5 +1,5 @@
 [project]
-name = "scm_hybrid"
+name = "jax_scm"
 version = "0.1.0"
 description = "An atmospheric single column model with numerical and machine learning components written in jax."
 requires-python = ">=3.12"

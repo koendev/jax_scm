@@ -6,9 +6,9 @@ import pandas as pd
 import xarray as xr
 from jax import numpy as jnp
 
-from scm.grid import StaggeredGrid
-from scm.interfaces import ProgVarsT, DiagVarsT
-from scm.mo import MOResult
+from src.scm.grid import StaggeredGrid
+from src.scm.interfaces import ProgVarsT, DiagVarsT
+from src.scm.mo import MOResult
 
 
 def make_dataset(

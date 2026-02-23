@@ -11,8 +11,8 @@ import jax.numpy as jnp
 import jax.tree_util
 import pandas as pd
 
-from scm.grid import StaggeredGrid
-from scm.mo import MOResult, MOSettings
+from src.scm.grid import StaggeredGrid
+from src.scm.mo import MOResult, MOSettings
 
 # Placeholders for concrete implementations of ProgVars and DiagVars per closure scheme
 ProgVarsT = TypeVar("ProgVarsT")

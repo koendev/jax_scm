@@ -111,7 +111,7 @@ def download_data(
 
 
 if __name__ == "__main__":
-    from scm.io.cache import XRCache
+    from src.scm.io.cache import XRCache
 
     logging.basicConfig(level="INFO")
     xr_cache = XRCache("../forcing/.era5_cache", disable=False)

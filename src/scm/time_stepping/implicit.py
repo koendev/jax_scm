@@ -32,10 +32,10 @@ import jax
 import jax.numpy as jnp
 from jax.lax.linalg import tridiagonal_solve
 
-from scm.grid import StaggeredGrid
-from scm.interfaces import ModelFn
-from scm.mynn.interfaces import ProgVarsMYNN
-from scm.time_stepping.utils import clip_state
+from src.scm.grid import StaggeredGrid
+from src.scm.interfaces import ModelFn
+from src.scm.mynn.interfaces import ProgVarsMYNN
+from src.scm.time_stepping.utils import clip_state
 
 
 def cn_solve(
