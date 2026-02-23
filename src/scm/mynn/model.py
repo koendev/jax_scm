@@ -5,12 +5,12 @@ from typing import Tuple
 import jax
 import jax.numpy as jnp
 
-from src.scm.grad import d_dz
-from src.scm.grid import StaggeredGrid
-from src.scm.interfaces import Simulation, ModelFn, Forcing
-from src.scm.mo import init_mo_sfc, MOResult
-from src.scm.mynn.closure import init_closure, get_qke_sfc
-from src.scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
+from scm.grad import d_dz
+from scm.grid import StaggeredGrid
+from scm.interfaces import Simulation, ModelFn, Forcing
+from scm.mo import init_mo_sfc, MOResult
+from scm.mynn.closure import init_closure, get_qke_sfc
+from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
 
 
 def init_model(sim: Simulation[ProgVarsMYNN, DiagVarsMYNN], implicit: bool) -> ModelFn[ProgVarsMYNN, DiagVarsMYNN]:

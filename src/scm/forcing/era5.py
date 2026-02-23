@@ -7,15 +7,15 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import CubicSpline
 
-from src.scm import convert
-from src.scm import consts
-from src.scm.forcing.interp import get_ts_interp_fn
-from src.scm.mo import MOSettings
-from src.scm.grid import StaggeredGrid
-from src.scm.interfaces import Simulation, Forcing
-from src.scm.io import era5
-from src.scm.io.cache import XRCache
-from src.scm.mynn.interfaces import ProgVarsMYNN
+from scm import convert
+from scm import consts
+from scm.forcing.interp import get_ts_interp_fn
+from scm.mo import MOSettings
+from scm.grid import StaggeredGrid
+from scm.interfaces import Simulation, Forcing
+from scm.io import era5
+from scm.io.cache import XRCache
+from scm.mynn.interfaces import ProgVarsMYNN
 
 
 def interp(

@@ -8,8 +8,8 @@ from typing import Callable, Tuple, Literal, Protocol
 import jax
 import jax.numpy as jnp
 
-from src.scm import consts
-from src.scm import convert as conv
+from scm import consts
+from scm import convert as conv
 
 logger = logging.getLogger("scm.mo")
 SimFuncType = Callable[[jnp.ndarray], jnp.ndarray]

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Callable
 
-import jax
 import numpy as np
 import pandas as pd
 import xarray as xr

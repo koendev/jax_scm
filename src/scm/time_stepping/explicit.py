@@ -4,8 +4,8 @@ from typing import Callable
 
 import jax
 
-from src.scm.interfaces import ModelFn
-from src.scm.time_stepping.utils import clip_state
+from scm.interfaces import ModelFn
+from scm.time_stepping.utils import clip_state
 
 
 def get_euler_step_fn(model: ModelFn) -> Callable:

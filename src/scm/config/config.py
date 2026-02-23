@@ -6,7 +6,7 @@ from typing import Self
 from enum import StrEnum
 
 import pydantic
-from src.scm.config.yaml import yaml_to_dict
+from scm.config.yaml import yaml_to_dict
 
 
 class TimeIntMethod(StrEnum):

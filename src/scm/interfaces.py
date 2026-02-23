@@ -11,8 +11,8 @@ import jax.numpy as jnp
 import jax.tree_util
 import pandas as pd
 
-from src.scm.grid import StaggeredGrid
-from src.scm.mo import MOResult, MOSettings
+from scm.grid import StaggeredGrid
+from scm.mo import MOResult, MOSettings
 
 # Placeholders for concrete implementations of ProgVars and DiagVars per closure scheme
 ProgVarsT = TypeVar("ProgVarsT")
@@ -62,6 +62,17 @@ class Forcing(Generic[ProgVarsT, DiagVarsT]):
     def __post_init__(self):
         if not ((self.w_th_s is None) or (self.th_s is None)):
             raise ValueError("Exactly one of w_th_s and th_s must be provided.")
+
+
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class Output(Generic[ProgVarsT, DiagVarsT]):
+    """Simulation output container."""
+
+    state_hist: ProgVarsT
+    diag_hist: DiagVarsT
+    mo_hist: MOResult
+    time: jnp.ndarray
 
 
 class ModelFn(Protocol[ProgVarsT, DiagVarsT]):

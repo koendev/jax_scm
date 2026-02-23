@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import xarray as xr
 
-from src.scm import consts
+from scm import consts
 
 T = TypeVar("T")
 

@@ -5,8 +5,8 @@ import time
 
 from jax import numpy as jnp
 
-from src.scm import consts
-from src.scm.interfaces import ProgVarsT
+from scm import consts
+from scm.interfaces import ProgVarsT
 
 
 class IterationTimer:
