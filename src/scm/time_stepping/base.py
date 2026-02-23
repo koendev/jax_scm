@@ -5,14 +5,14 @@ from typing import Tuple
 import jax
 from jax import numpy as jnp
 
-from scm.interfaces import Simulation, ModelFn, Output
+from scm.interfaces import Simulation, ModelFn, Output, ProgVarsT, DiagVarsT
 from scm.config import Namelist
 from scm.time_stepping.explicit import get_euler_step_fn, get_ab2_step_fn
 from scm.time_stepping.implicit import get_cn_step_fn
 from scm.time_stepping.utils import IterationTimer
 
 
-def simulate(model: ModelFn, sim: Simulation, cfg: Namelist) -> Output:
+def simulate(model: ModelFn, sim: Simulation, cfg: Namelist) -> Output[ProgVarsT, DiagVarsT]:
     print("Config:", cfg)
 
     if cfg.time_int == "explicit":
@@ -46,7 +46,12 @@ def simulate(model: ModelFn, sim: Simulation, cfg: Namelist) -> Output:
         raise ValueError(f"Invalid time_int: {cfg.time_int}")
 
 
-def simulate_ab2_fixed(model: ModelFn, sim: Simulation, dt_s: float, dt_s_out: float) -> Output:
+def simulate_ab2_fixed(
+    model: ModelFn,
+    sim: Simulation,
+    dt_s: float,
+    dt_s_out: float,
+) -> Output[ProgVarsT, DiagVarsT]:
     """Simulate model with AB2 and constant timestep."""
     # Setup time integration
     _euler = get_euler_step_fn(model)
@@ -81,11 +86,17 @@ def simulate_ab2_fixed(model: ModelFn, sim: Simulation, dt_s: float, dt_s_out: f
     _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, dydt0, diag0, mo_res0), xs=t_outer)
     timer.finalize()
 
+    # Prepend initial state
+    state_traj = jax.tree_util.tree_map(lambda y0_f, yh_f: jnp.concatenate([y0_f[None, ...], yh_f]), y0, y_hist)
+    diag_traj = jax.tree_util.tree_map(lambda d0_f, dh_f: jnp.concatenate([d0_f[None, ...], dh_f]), diag0, diag_hist)
+    mo_traj = jax.tree_util.tree_map(lambda m0_f, mh_f: jnp.concatenate([m0_f[None, ...], mh_f]), mo_res0, mo_hist)
+    t_s = jnp.concatenate([jnp.array([sim.t_start_s]), t_outer + dt_s_out])
+
     return Output(
-        state_traj=y_hist,
-        diag_traj=diag_hist,
-        mo_traj=mo_hist,
-        t_s=t_outer,
+        state_traj=state_traj,
+        diag_traj=diag_traj,
+        mo_traj=mo_traj,
+        t_s=t_s,
     )
 
 
@@ -96,7 +107,7 @@ def simulate_ab2_adaptive(
     dt_s_init: float,
     dt_s_max: float,
     dt_s_out: float,
-) -> Output:
+) -> Output[ProgVarsT, DiagVarsT]:
     """Simulate model with AB2 and adaptive time stepping based on CFL condition for diffusion."""
     # Setup time integration
     _euler = get_euler_step_fn(model)
@@ -153,11 +164,17 @@ def simulate_ab2_adaptive(
     _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, dydt0, diag0, mo_res0), xs=t_outer)
     timer.finalize()
 
+    # Prepend initial state
+    state_traj = jax.tree_util.tree_map(lambda y0_f, yh_f: jnp.concatenate([y0_f[None, ...], yh_f]), y0, y_hist)
+    diag_traj = jax.tree_util.tree_map(lambda d0_f, dh_f: jnp.concatenate([d0_f[None, ...], dh_f]), diag0, diag_hist)
+    mo_traj = jax.tree_util.tree_map(lambda m0_f, mh_f: jnp.concatenate([m0_f[None, ...], mh_f]), mo_res0, mo_hist)
+    t_s = jnp.concatenate([jnp.array([sim.t_start_s]), t_outer + dt_s_out])
+
     return Output(
-        state_traj=y_hist,
-        diag_traj=diag_hist,
-        mo_traj=mo_hist,
-        t_s=t_outer,
+        state_traj=state_traj,
+        diag_traj=diag_traj,
+        mo_traj=mo_traj,
+        t_s=t_s,
     )
 
 
@@ -166,7 +183,7 @@ def simulate_cn(
     sim: Simulation,
     dt_s: float,
     dt_s_out: float,
-) -> Output:
+) -> Output[ProgVarsT, DiagVarsT]:
     """Simulate model with semi-implicit Crank-Nicolson diffusion and AB2 explicit sources.
 
     Diffusion terms are solved implicitly (K fixed per step); non-diffusive
@@ -220,9 +237,15 @@ def simulate_cn(
     _, (y_hist, _, diag_hist, mo_hist) = jax.lax.scan(_scan_outer, init=(y1, S0, diag0, mo_res0), xs=t_outer)
     timer.finalize()
 
+    # Prepend initial state
+    state_traj = jax.tree_util.tree_map(lambda y0_f, yh_f: jnp.concatenate([y0_f[None, ...], yh_f]), y0, y_hist)
+    diag_traj = jax.tree_util.tree_map(lambda d0_f, dh_f: jnp.concatenate([d0_f[None, ...], dh_f]), diag0, diag_hist)
+    mo_traj = jax.tree_util.tree_map(lambda m0_f, mh_f: jnp.concatenate([m0_f[None, ...], mh_f]), mo_res0, mo_hist)
+    t_s = jnp.concatenate([jnp.array([sim.t_start_s]), t_outer + dt_s_out])
+
     return Output(
-        state_traj=y_hist,
-        diag_traj=diag_hist,
-        mo_traj=mo_hist,
-        t_s=t_outer,
+        state_traj=state_traj,
+        diag_traj=diag_traj,
+        mo_traj=mo_traj,
+        t_s=t_s,
     )
