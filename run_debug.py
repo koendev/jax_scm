@@ -6,7 +6,7 @@ import jax
 import numpy as np
 
 import cases
-from scm.config import Namelist
+from scm.config import Namelist, AdaptiveTimestepConfig, TimeIntMethod
 from scm.forcing.era5 import get_era5_sim  # noqa
 from scm.grid import StaggeredGrid
 from scm.forcing.interp import interp_dtindex
@@ -50,20 +50,20 @@ if __name__ == "__main__":
         lat_deg=52.0,
         lon_deg=5.0,
         time_slice=("2006-07-01T11:00", "2006-07-02T12:00"),
-        grid=StaggeredGrid(Nz=400, H=4000.0),
+        grid=StaggeredGrid(Nz=150, H=3000.0),
         source="cds",
     )
 
     cfg_ab2 = Namelist(
-        time_int="explicit",
+        time_int=TimeIntMethod.EXPLICIT,
         dt_s=0.001,
         dt_s_out=300.0,
-        adaptive_timestep=dict(cfl_max=0.05, dt_s_max=1.0),
+        adaptive_timestep=AdaptiveTimestepConfig(cfl_max=0.1, dt_s_max=10.0),
     )
 
     cfg_cn = Namelist(
-        time_int="implicit",
-        dt_s=1,
+        time_int=TimeIntMethod.IMPLICIT,
+        dt_s=2,
         dt_s_out=300.0,
     )
     cfg = cfg_cn
@@ -79,6 +79,6 @@ if __name__ == "__main__":
         time = out.t_s / 3600.0  # convert to hours
 
     # Save output
-    ds = out_to_ds(out=out, sim=sim, time=out.t_s / 60 / 60)
+    ds = out_to_ds(out=out, sim=sim, time=time)
     ds.to_netcdf("out.nc")
     print("Written to disk.")
