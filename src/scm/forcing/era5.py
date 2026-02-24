@@ -87,7 +87,30 @@ def get_era5_sim(
     source: Literal["destine", "google", "cds"],
     cache_dir: str | None = ".era5_cache",
 ) -> Simulation:
-    """Get a Simulation object with ERA5 forcing data."""
+    """Get a Simulation object with ERA5 forcing data.
+
+    Parameters
+    ----------
+    name : str
+        Name of the simulation
+    lat_deg : float
+        Latitude in degrees
+    lon_deg : float
+        Longitude in degrees
+    time_slice : str | datetime.date | Tuple[str, str] | Tuple[datetime.datetime, datetime.datetime]
+        Time slice for the simulation. For "cds" source, must be a tuple of (start, end).
+    grid : StaggeredGrid
+        Vertical grid for the simulation
+    source : Literal["destine", "google", "cds"]
+        Data source. "cds" uses the LS2D downloader which downloads ERA5 from CDS.
+    cache_dir : str | None
+        Directory for caching downloaded data. Default is ".era5_cache".
+
+    Returns
+    -------
+    Simulation
+
+    """
     cache_dir = pathlib.Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -123,61 +146,171 @@ def get_era5_sim(
         ls2d.download_era5(settings, exit_when_waiting=True)
 
         # Read ERA5 data, and calculate derived properties (thl, etc.):
-        era5 = ls2d.Read_era5(settings)
+        era5_reader = ls2d.Read_era5(settings)
 
         # Calculate large-scale forcings:
         # `n_av` is the number of ERA5 gridpoints (+/-) over which
         # the ERA5 variables and forcings are averaged.
-        era5.calculate_forcings(n_av=1, method="2nd")
+        era5_reader.calculate_forcings(n_av=1, method="2nd")
 
         # Interpolate ERA5 to fixed height grid:
-        ds_interp = era5.get_les_input(z=grid.z)
+        ds = era5_reader.get_les_input(z=grid.z)
 
-    # My own implementation
-    # Set up data download function with optional caching
-    if cache_dir is not None:
-        xr_cache = XRCache(cache_dir)
-        download_data = xr_cache.cache(era5.download_data)
+        # Create time coordinate in s
+        t = ds["time_sec"].values
+        t_start_s, t_end_s = t[0], t[-1]
+
+        # Extract atmospheric variables from interpolated dataset
+        # Note: LS2D uses thl (liquid water potential temperature) and qt (total specific humidity)
+        # which include cloud water effects. For dry cases, thl ≈ th and qt ≈ qv
+        u = jnp.array(ds["u"].values)
+        v = jnp.array(ds["v"].values)
+        th = jnp.array(ds["thl"].values)
+        qv = jnp.array(ds["qt"].values)
+        u_geo = jnp.array(ds["ug"].values)
+        v_geo = jnp.array(ds["vg"].values)
+
+        # Create forcing functions for geostrophic wind
+        u_geo_fn = get_ts_interp_fn(time_s=jnp.array(t), data=u_geo)
+        v_geo_fn = get_ts_interp_fn(time_s=jnp.array(t), data=v_geo)
+
+        # Create surface temperature forcing function
+        t_s_fn = get_ts_interp_fn(
+            time_s=jnp.array(t),
+            data=jnp.array(ds["ts"].values),
+        )
+
+        # Create moisture flux forcing
+        w_qv_s_fn = get_ts_interp_fn(time_s=jnp.array(t), data=jnp.array(ds["wq"].values))
+
+        # Coriolis parameter
+        f_c = float(ds.attrs["fc"])
+
+        # Extract large-scale advective tendencies and large-scale vertical
+        # velocity (subsidence). LS2D provides horizontal advective tendencies
+        # and wls separately; subsidence (-wls * d/dz) is computed at run-time.
+        th_adv = jnp.array(ds["dtthl_advec"].values)  # (time, z), K s-1
+        qv_adv = jnp.array(ds["dtqt_advec"].values)  # (time, z), kg kg-1 s-1
+        u_adv = jnp.array(ds["dtu_advec"].values)  # (time, z), m s-2
+        v_adv = jnp.array(ds["dtv_advec"].values)  # (time, z), m s-2
+        wls = jnp.array(ds["wls"].values)  # (time, z), m s-1
+
+        th_adv_fn = get_ts_interp_fn(time_s=jnp.array(t), data=th_adv)
+        qv_adv_fn = get_ts_interp_fn(time_s=jnp.array(t), data=qv_adv)
+        u_adv_fn = get_ts_interp_fn(time_s=jnp.array(t), data=u_adv)
+        v_adv_fn = get_ts_interp_fn(time_s=jnp.array(t), data=v_adv)
+        wls_fn = get_ts_interp_fn(time_s=jnp.array(t), data=wls)
+
+        @jax.jit
+        def ls_tends_fn(
+            t_s: jnp.ndarray,
+            state: ProgVarsMYNN,
+            grads: ProgVarsMYNN,
+            _,
+        ) -> ProgVarsMYNN:
+            """Large-scale tendencies: horizontal advection + subsidence.
+
+            LS2D provides horizontal advective tendencies directly.
+            Subsidence is computed as ``-wls * d(phi)/dz`` where ``grads``
+            holds vertical gradients at half levels, averaged to full
+            levels before multiplication.
+            """
+            w = wls_fn(t_s)  # large-scale vertical velocity, (Nz,)
+            # Average half-level gradients to full levels for subsidence
+            du_dz = (grads.u[1:] + grads.u[:-1]) / 2
+            dv_dz = (grads.v[1:] + grads.v[:-1]) / 2
+            dth_dz = (grads.th[1:] + grads.th[:-1]) / 2
+            dqv_dz = (grads.qv[1:] + grads.qv[:-1]) / 2
+            return ProgVarsMYNN(
+                u=u_adv_fn(t_s) - w * du_dz,
+                v=v_adv_fn(t_s) - w * dv_dz,
+                th=th_adv_fn(t_s) - w * dth_dz,
+                qv=qv_adv_fn(t_s) - w * dqv_dz,
+                qke=jnp.zeros_like(state.qke),  # no large-scale TKE forcing
+            )
+
+        # Gather forcing in Forcing object
+        frc = Forcing(
+            u_geo=u_geo_fn,
+            v_geo=v_geo_fn,
+            th_s=t_s_fn,
+            w_qv_s=w_qv_s_fn,
+            f_c=f_c,
+            ls_tends=ls_tends_fn,
+        )
+
+        # Create initial conditions
+        init = ProgVarsMYNN(
+            u=u[0, :],
+            v=v[0, :],
+            th=th[0, :],
+            qv=qv[0, :],
+            qke=jnp.ones(grid.Nz) * 0.01,  # small initial TKE
+        )
+
+        # Get roughness lengths (use time-averaged values or initial values)
+        z0m = ds["z0m"].mean("time").item()  # todo: implement time varying
+        z0h = ds["z0h"].mean("time").item()  # todo: implement time varying
+
+        # Create simulation object
+        sim = Simulation(
+            name=name,
+            grid=grid,
+            init=init,
+            forcing=frc,
+            mo_settings=MOSettings(z0h=z0h, z0m=z0m),
+            t_start_s=int(t_start_s),
+            t_end_s=int(t_end_s),
+            t_index=ds.indexes["time"],
+        )
+
+        return sim
     else:
-        download_data = era5.download_data
+        # Zarr-based sources (Destine, Google)
+        # Set up data download function with optional caching
+        if cache_dir is not None:
+            xr_cache = XRCache(cache_dir)
+            download_data = xr_cache.cache(era5.download_data)
+        else:
+            download_data = era5.download_data
 
-    if source == "destine":
-        # I need to make some modifications to adjust coordinates
-        # Also below, we have hard coded inversion of level dim for Google version
-        raise NotImplementedError
+        if source == "destine":
+            # I need to make some modifications to adjust coordinates
+            # Also below, we have hard coded inversion of level dim for Google version
+            raise NotImplementedError
 
-    # Download ERA5 data
-    ds = download_data(lat_deg, lon_deg, time_slice, source)
-    p_hPa = ds["level"].drop_vars("level")  # save pressure
-    ds = ds.drop_vars("level")  # drop because it causes problems for interpolation
+        # Download ERA5 data
+        ds = download_data(lat_deg, lon_deg, time_slice, source)
+        p_hPa = ds["level"].drop_vars("level")  # save pressure
+        ds = ds.drop_vars("level")  # drop because it causes problems for interpolation
 
-    # Compute geostrophic wind
-    ds_uv_geo = convert.uv_geo_from_z(lat_deg=ds["latitude"], lon_deg=ds["longitude"], z=ds["z"])
-    ds = ds.merge(ds_uv_geo, compat="override")
+        # Compute geostrophic wind
+        ds_uv_geo = convert.uv_geo_from_z(lat_deg=ds["latitude"], lon_deg=ds["longitude"], z=ds["z"])
+        ds = ds.merge(ds_uv_geo, compat="override")
 
-    # Compute potential temperature
-    ds["th"] = convert.tk_to_th(tk=ds["t"], p_hPa=p_hPa)
+        # Compute potential temperature
+        ds["th"] = convert.tk_to_th(tk=ds["t"], p_hPa=p_hPa)
 
-    # We don't need neighbours anymore
-    ds = ds.sel(latitude=lat_deg, longitude=lon_deg, method="nearest")
+        # We don't need neighbours anymore
+        ds = ds.sel(latitude=lat_deg, longitude=lon_deg, method="nearest")
 
-    # Geopotential to height
-    z_agl = (ds["z"] - ds["z_sfc"]) / 9.81  # in m
-    z_target = xr.DataArray(grid.z, dims=["grid"])
+        # Geopotential to height
+        z_agl = (ds["z"] - ds["z_sfc"]) / 9.81  # in m
+        z_target = xr.DataArray(grid.z, dims=["grid"])
 
-    # Interpolate ERA5 to grid levels
-    # As ERA5 has very few levels near surface, we add surface values as extra points
-    # Disable jax nan checking temporarily because it will otherwise raise exception
-    with jax.debug_nans(False):
-        uv0 = xr.DataArray(np.zeros(ds.sizes["time"]), dims=["time"], coords=ds["u10"].coords)
-        u = interp(ds["u"], z_agl, z_target, dim="level", extra={10: ds["u10"], 0: uv0})
-        v = interp(ds["v"], z_agl, z_target, dim="level", extra={10: ds["v10"], 0: uv0})
-        th = interp(ds["th"], z_agl, z_target, dim="level", extra={2: ds["t2m"], 0: ds["skt"]})  # todo: to pot temp
+        # Interpolate ERA5 to grid levels
+        # As ERA5 has very few levels near surface, we add surface values as extra points
+        # Disable jax nan checking temporarily because it will otherwise raise exception
+        with jax.debug_nans(False):
+            uv0 = xr.DataArray(np.zeros(ds.sizes["time"]), dims=["time"], coords=ds["u10"].coords)
+            u = interp(ds["u"], z_agl, z_target, dim="level", extra={10: ds["u10"], 0: uv0})
+            v = interp(ds["v"], z_agl, z_target, dim="level", extra={10: ds["v10"], 0: uv0})
+            th = interp(ds["th"], z_agl, z_target, dim="level", extra={2: ds["t2m"], 0: ds["skt"]})  # todo: to pot temp
 
-        # No extra points, so extrpolation automatically used in `interp`
-        qv = interp(ds["q"], z_agl, z_target, dim="level")
-        u_geo = interp(ds["ug"], z_agl, z_target, dim="level")
-        v_geo = interp(ds["vg"], z_agl, z_target, dim="level")
+            # No extra points, so extrpolation automatically used in `interp`
+            qv = interp(ds["q"], z_agl, z_target, dim="level")
+            u_geo = interp(ds["ug"], z_agl, z_target, dim="level")
+            v_geo = interp(ds["vg"], z_agl, z_target, dim="level")
 
     # Create time coordinate in s
     t = ds["time"]

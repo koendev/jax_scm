@@ -52,27 +52,35 @@ def out_to_ds(
     mo_dict = {f"mo_{v}": (("time",), v_data) for v, v_data in mo_dict.items()}
     mo_ds = xr.Dataset(mo_dict, coords=coords)
 
-    # Sample forcing and add to dataset
-    forcing_dict = sample_forcing(sim.forcing, out.t_s)
-    forcing_dict = {
-        f"frc_{v}": (
-            _get_dims(v_data),
-            v_data,
-        )
-        for v, v_data in forcing_dict.items()
-        if v_data is not None
-    }
-    forcing_ds = xr.Dataset(forcing_dict, coords=coords)
+    ds = xr.merge([state_ds, diag_ds, mo_ds])
 
-    # Serialize MO settings
-    mo = sim.mo_settings.serialize()
-
-    # Merge everything
-    ds = xr.merge([state_ds, diag_ds, mo_ds, forcing_ds])
+    # Add meta data
     ds["_t_s"] = out.t_s  # keep original simulation time axis
     ds.attrs["name"] = sim.name
     ds.attrs["t_start_s"] = sim.t_start_s
     ds.attrs["t_end_s"] = sim.t_end_s
-    ds.attrs["mo_settings"] = mo
+
+    try:
+        # Sample forcing and add to dataset
+        forcing_dict = sample_forcing(sim.forcing, out.t_s)
+        forcing_dict = {
+            f"frc_{v}": (
+                _get_dims(v_data),
+                v_data,
+            )
+            for v, v_data in forcing_dict.items()
+            if v_data is not None
+        }
+        forcing_ds = xr.Dataset(forcing_dict, coords=coords)
+        ds = xr.merge([ds, forcing_ds])
+    except Exception as e:
+        print(f"Warning: Could not sample forcing for output dataset. Error: {e}")
+
+    try:
+        # Serialize MO settings
+        mo = sim.mo_settings.serialize()
+        ds.attrs["mo_settings"] = mo
+    except Exception as e:
+        print(f"Warning: Could not serialize MO settings for output dataset. Error: {e}")
 
     return ds

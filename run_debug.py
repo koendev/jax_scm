@@ -8,6 +8,7 @@ import numpy as np
 import cases
 from scm.config import Namelist
 from scm.forcing.era5 import get_era5_sim  # noqa
+from scm.grid import StaggeredGrid
 from scm.forcing.interp import interp_dtindex
 from scm.io.local import out_to_ds
 from scm.mynn.model import init_model
@@ -44,6 +45,14 @@ if __name__ == "__main__":
     #     time_slice="2025-07-01",
     #     source="google",
     # )
+    sim = get_era5_sim(
+        name="ERA5 Test Simulation",
+        lat_deg=52.0,
+        lon_deg=5.0,
+        time_slice=("2006-07-01T11:00", "2006-07-02T12:00"),
+        grid=StaggeredGrid(Nz=400, H=4000.0),
+        source="cds",
+    )
 
     cfg_ab2 = Namelist(
         time_int="explicit",
@@ -54,10 +63,10 @@ if __name__ == "__main__":
 
     cfg_cn = Namelist(
         time_int="implicit",
-        dt_s=0.5,
+        dt_s=1,
         dt_s_out=300.0,
     )
-    cfg = cfg_ab2
+    cfg = cfg_cn
 
     # Init and run model
     model = init_model(sim, implicit=cfg.is_implicit)
@@ -65,9 +74,9 @@ if __name__ == "__main__":
 
     # Prepare time axis
     if sim.t_index is not None:
-        time = interp_dtindex(t_s=np.array(t), idx=sim.t_index)
+        time = interp_dtindex(t_s=np.array(out.t_s), idx=sim.t_index)
     else:
-        time = t / 3600.0  # convert to hours
+        time = out.t_s / 3600.0  # convert to hours
 
     # Save output
     ds = out_to_ds(out=out, sim=sim, time=out.t_s / 60 / 60)

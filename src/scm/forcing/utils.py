@@ -31,7 +31,7 @@ def sample_forcing(f: Forcing, t_s: jnp.ndarray) -> Dict[str, jnp.ndarray | None
         return res
 
     if f.ls_tends is not None:
-        raise warnings.warn("Sampling of large-scale tendencies not implemented yet. Ignoring ls_tends!")
+        warnings.warn("Sampling of large-scale tendencies not implemented yet. Ignoring ls_tends!")
 
     return {
         # Expect 2D (time, z) for geostrophic wind
