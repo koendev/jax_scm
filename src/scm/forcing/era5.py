@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import Literal, Dict
+import datetime
+import pathlib
+from typing import Literal, Dict, Tuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import xarray as xr
 from scipy.interpolate import CubicSpline
+import ls2d
 
 from scm import consts, convert
 from scm.forcing.interp import get_ts_interp_fn
@@ -79,12 +82,58 @@ def get_era5_sim(
     name: str,
     lat_deg: float,
     lon_deg: float,
-    time_slice: str | slice,
+    time_slice: str | datetime.date | Tuple[str, str] | Tuple[datetime.datetime, datetime.datetime],
     grid: StaggeredGrid,
-    source: Literal["destine", "google"],
+    source: Literal["destine", "google", "cds"],
     cache_dir: str | None = ".era5_cache",
 ) -> Simulation:
     """Get a Simulation object with ERA5 forcing data."""
+    cache_dir = pathlib.Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    if source == "cds":
+        # Use LS2D implementation here!
+        try:
+            start, end = time_slice
+        except TypeError:
+            raise ValueError("For LS2D, time_slice must be a tuple of (start, end) datetimes or strings.")
+
+        if isinstance(start, str):
+            start = datetime.datetime.fromisoformat(start)
+        if isinstance(end, str):
+            end = datetime.datetime.fromisoformat(end)
+
+        cache_dir = cache_dir / "ls2d"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        settings = {
+            "central_lat": lat_deg,
+            "central_lon": lon_deg,
+            "area_size": 1,
+            "case_name": "cabauw",
+            "era5_path": str(cache_dir),
+            "era5_expver": 1,  # 1=normal ERA5, 5=ERA5 near-realtime
+            "start_date": start,
+            "end_date": end,
+            "write_log": False,
+            "data_source": "CDS",
+        }
+
+        # will sys.exit until download done
+        ls2d.download_era5(settings, exit_when_waiting=True)
+
+        # Read ERA5 data, and calculate derived properties (thl, etc.):
+        era5 = ls2d.Read_era5(settings)
+
+        # Calculate large-scale forcings:
+        # `n_av` is the number of ERA5 gridpoints (+/-) over which
+        # the ERA5 variables and forcings are averaged.
+        era5.calculate_forcings(n_av=1, method="2nd")
+
+        # Interpolate ERA5 to fixed height grid:
+        ds_interp = era5.get_les_input(z=grid.z)
+
+    # My own implementation
     # Set up data download function with optional caching
     if cache_dir is not None:
         xr_cache = XRCache(cache_dir)
@@ -195,8 +244,8 @@ if __name__ == "__main__":
         name="ERA5 Test Simulation",
         lat_deg=52.0,
         lon_deg=5.0,
-        time_slice="2020-01-01",
+        time_slice=("2006-06-30T12:00", "2006-07-03T00:00"),
         grid=StaggeredGrid(Nz=100, H=1000.0),
-        source="google",
+        source="cds",
     )
     print(sim)
