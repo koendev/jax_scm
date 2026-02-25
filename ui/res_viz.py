@@ -1,3 +1,5 @@
+"""todo: rewrite for dataset wrapper"""
+
 from __future__ import annotations
 
 import bokeh.layouts as bl
@@ -8,39 +10,41 @@ import xarray as xr
 
 WIDTH = 1200
 
-ds = xr.open_dataset("../out.nc")
-ds["m"] = np.sqrt(ds["u"] ** 2 + ds["v"] ** 2)
-ds["d"] = np.rad2deg(np.arctan2(-ds["u"], -ds["v"]))
 
-H = ds["zh"].values[-1]  # total depth
-t_start, t_end = ds["time"].values[[0, -1]]
+class DatasetWrapper:
+    def __init__(self, ds: xr.Dataset):
+        # Compute additional variables for visualization
+        ds = ds.copy()
+        ds["m"] = np.sqrt(ds["u"] ** 2 + ds["v"] ** 2)
+        ds["d"] = np.rad2deg(np.arctan2(-ds["u"], -ds["v"]))
 
-vars_1d = [str(v) for v in ds.data_vars if len(ds[v].shape) == 1] + ["time"]
-store_1d = bm.ColumnDataSource(data={v: ds[v].values for v in vars_1d})
+        self.ds = ds
+        self.H = ds["zh"].values[-1]  # total depth
+        self.t_start, self.t_end = ds["time"].values[[0, -1]]  # start and end time
 
-vars_2d = [str(v) for v in ds.data_vars if len(ds[v].shape) == 2]
+        self.vars_1d = [str(v) for v in ds.data_vars if len(ds[v].shape) == 1]
+        self.vars_2d = [str(v) for v in ds.data_vars if len(ds[v].shape) == 2]
+
+    def get_ts_store(self) -> bm.ColumnDataSource:
+        store = bm.ColumnDataSource(data={v: self.ds[v].values for v in self.vars_1d + ["time"]})
+        return store
 
 
 class TsPlot:
-    def __init__(self, var: str, linked: TsPlot | None = None):
-        # Create figure with shared x_range if linked, otherwise default to time range
-        fig_kwargs = {}
-        if linked:
-            fig_kwargs["x_range"] = linked.p.x_range
-
-        p = bp.figure(height=300, width=WIDTH, **fig_kwargs)
-        if not linked:
-            p.x_range.range_padding = p.y_range.range_padding = 0
-            p.x_range.bounds = (t_start, t_end)
+    def __init__(self, dw: DatasetWrapper, var: str):
+        # Create figure
+        p = bp.figure(height=300, width=WIDTH)
+        p.x_range.range_padding = p.y_range.range_padding = 0
+        p.x_range.bounds = (dw.t_start, dw.t_end)
 
         # Plot line
-        line = p.line(x="time", y=var, source=store_1d)
+        line = p.line(x="time", y=var, source=dw.get_ts_store())  # todo: maybe through dataset setter?
 
         # Selector
         def _sel_callback(attr, old, new):
             line.glyph.y = new
 
-        select = bm.Select(title="Select variable", options=vars_1d[:-1], value=var)
+        select = bm.Select(title="Select variable", options=dw.vars_1d, value=var)
         select.on_change("value", _sel_callback)
 
         # Log switch
@@ -54,8 +58,12 @@ class TsPlot:
         log_toggle.on_change("active", _log_callback)
 
         self.p = p
+        self.line = line
         self.select = select
         self.log_toggle = log_toggle
+
+    def set_ds(self, dw: DatasetWrapper):
+        raise NotImplemented("Switching Dataset not implemented, yet.")
 
     def get_layout(self):
         return bl.column(
@@ -206,9 +214,16 @@ class FieldPlot:
         )
 
 
-bp.curdoc().add_root(
-    bl.column(
-        FieldPlot("m").get_layout(),
-        TsPlot("mo_u_st").get_layout(),
-    )
-)
+class ResultViz:
+    def __init__(self, ds: xr.Dataset):
+        self.dw = DatasetWrapper(ds)
+
+    def get_layout(self):
+        return bl.column(
+            # FieldPlot("m").get_layout(),
+            TsPlot(dw=self.dw, var="mo_u_st").get_layout(),
+        )
+
+
+res_viz = ResultViz(ds=xr.open_dataset("../out.nc"))
+bp.curdoc().add_root(res_viz.get_layout())
