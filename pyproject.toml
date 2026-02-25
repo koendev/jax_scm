@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
 [project]
 name = "jax_scm"
 version = "0.1.0"
@@ -24,6 +28,23 @@ dependencies = [
     "cdsapi>=0.7.7",
 ]
 
+[dependency-groups]
+dev = [
+    "black",
+    "dvc>=3.64.1",
+    "dvc-ssh>=4.2.2",
+    "ipykernel>=7.1.0",
+    "pandas-stubs==2.3.3.*",
+    "scipy-stubs==1.16.*",
+    "pip>=25.3",
+]
+
+[tool.uv.sources]
+ls2d = { git = "https://github.com/maxiimilian/LS2D", rev = "fb66e73"}
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scm"]
+
 [tool.black]
 line-length = 120  # align with pycharm
 # 'extend-exclude' excludes files or directories in addition to the defaults
@@ -38,16 +59,3 @@ extend-exclude = '''
 )
 '''
 
-[tool.uv.sources]
-ls2d = { git = "https://github.com/maxiimilian/LS2D", rev = "fb66e73"}
-
-[dependency-groups]
-dev = [
-    "black",
-    "dvc>=3.64.1",
-    "dvc-ssh>=4.2.2",
-    "ipykernel>=7.1.0",
-    "pandas-stubs==2.3.3.*",
-    "scipy-stubs==1.16.*",
-    "pip>=25.3",
-]
