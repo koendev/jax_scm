@@ -215,7 +215,7 @@ class FieldPlot:
         )
 
 
-class ResultViz:
+class ResultViewer:
     def __init__(self, ds: xr.Dataset):
         self.dw = DatasetWrapper(ds)
 
@@ -226,5 +226,5 @@ class ResultViz:
         )
 
 
-res_viz = ResultViz(ds=xr.open_dataset("../out.nc"))
-bp.curdoc().add_root(res_viz.get_layout())
+# res_viz = ResultViewer(ds=xr.open_dataset("../out.nc"))
+# bp.curdoc().add_root(res_viz.get_layout())
