@@ -55,7 +55,7 @@ def out_to_ds(
     ds = xr.merge([state_ds, diag_ds, mo_ds])
 
     # Add meta data
-    ds["_t_s"] = out.t_s  # keep original simulation time axis
+    ds["_t_s"] = xr.DataArray(out.t_s, dims="time")  # keep original simulation time axis
     ds.attrs["name"] = sim.name
     ds.attrs["t_start_s"] = sim.t_start_s
     ds.attrs["t_end_s"] = sim.t_end_s
