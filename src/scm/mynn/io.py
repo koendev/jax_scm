@@ -68,8 +68,6 @@ def sim_from_ds(ds: xr.Dataset, **override) -> Simulation[ProgVarsMYNN, DiagVars
 
     ## Meta data
     name = override.get("name", ds.attrs.get("name", "loaded_simulation"))
-    t_start_s = override.get("t_start_s", ds.attrs["t_start_s"])
-    t_end_s = override.get("t_end_s", ds.attrs["t_end_s"])
 
     return Simulation(
         name=name,
@@ -77,6 +75,6 @@ def sim_from_ds(ds: xr.Dataset, **override) -> Simulation[ProgVarsMYNN, DiagVars
         init=init,
         forcing=forcing,
         mo_settings=mo_settings,
-        t_start_s=t_start_s,
-        t_end_s=t_end_s,
+        t_start_s=ds.attrs["t_start_s"],
+        t_end_s=ds.attrs["t_end_s"],
     )
