@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import pathlib
+import xarray as xr
 from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
-from scm.config import load_namelist
+from scm.config import load_namelist, Namelist
 from scm.examples.gabls1 import get_gabls1
 from scm.io.local import out_to_ds
 from scm.mynn.model import init_model
@@ -51,25 +52,13 @@ def get_ref_ax(
     return fig, ax
 
 
-if __name__ == "__main__":
-    # Load config and run simulation
-    cfg = load_namelist("namelist_cn.yaml")
-    sim = get_gabls1(Nz=64, plot=False)
-    model = init_model(sim, cfg=cfg)
-    out = simulate(model=model, sim=sim, cfg=cfg)
-
-    # Save output
-    out_file = pathlib.Path(f"out_{sim.grid.Nz}.nc")
-    ds = out_to_ds(out=out, sim=sim, time=out.t_s / 60 / 60)
-    ds.to_netcdf(out_file)
-    print("Written to disk.")
-
+def make_report(ds: xr.Dataset, fname: str):
     t_min = ds["time"] * 60  # hours to minutes
     m = np.sqrt(ds["u"] ** 2 + ds["v"] ** 2)
     tau = (ds["u_w"] ** 2 + ds["v_w"] ** 2) ** 0.5
     blh = (tau / tau.isel(zh=0)).where(lambda x: x < 0.05).idxmax("zh")  # blh where stress < 5% of surface stress
 
-    with BaseReport(title="GABLS1 Validation", path=f"{out_file.stem}.html") as r:
+    with BaseReport(title="GABLS1 Validation", path=fname) as r:
         r.add_text("This report compares the jax-scm model against GABLS1 reference results from Cuxart et al. (2006).")
 
         fig, ax = get_ref_ax(
@@ -179,3 +168,24 @@ if __name__ == "__main__":
         ax.set_ylabel("Height, m")
         ax.legend()
         r.add_mpl_fig(fig, caption="Turbulent Prandtl number profile at 9h")
+
+
+def run(cfg: Namelist, name: str):
+    # Run simulation
+    sim = get_gabls1(Nz=64, plot=False)
+    model = init_model(sim, cfg=cfg)
+    out = simulate(model=model, sim=sim, cfg=cfg)
+
+    # Save output
+    out_file = pathlib.Path(f"out_{name}.nc")
+    ds = out_to_ds(out=out, sim=sim, time=out.t_s / 60 / 60)
+    ds.to_netcdf(out_file)
+    print("Written to disk.")
+
+    # Make report
+    make_report(ds, fname=f"report_{name}.html")
+
+
+if __name__ == "__main__":
+    run(cfg=load_namelist("namelist_cn.yaml"), name="cn")
+    run(cfg=load_namelist("namelist_ab2.yaml"), name="ab2")
