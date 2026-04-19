@@ -125,6 +125,7 @@ def get_ref_ax(
 def make_report(ds: xr.Dataset, fname: str):
     t_short = ["09:00", "10:00", "12:00", "14:00", "16:00"]
     t_long = [f"1967-08-16T{t}" for t in t_short]
+    t_1400 = "1967-08-16T14:00"
     ds = ds.sel(time=t_long)
 
     # Single value validation
@@ -134,7 +135,11 @@ def make_report(ds: xr.Dataset, fname: str):
     w_st = (consts.g / ds.attrs["th_ref"] * w_thv_s * zi) ** (1 / 3)  # m/s, tab 1 caption
 
     # Prepare 1400 TKE budget
-    tke_scale = w_st**3 / zi
+    tke_scale = w_st**3 / zi / 2  # div by two for qke -> tke
+    tke_P_S = (ds["qke_P_S"] / tke_scale).sel(time=t_1400)
+    tke_P_B = (ds["qke_P_B"] / tke_scale).sel(time=t_1400)
+    tke_eps = (ds["qke_eps"] / tke_scale).sel(time=t_1400)
+    w_tke = (ds["w_qke"] / tke_scale).sel(time=t_1400)
 
     with BaseReport(title="GABLS1 Validation", path=fname) as r:
         r.add_text("This report compares the jax-scm model against Wangara Day 33 reference results from NN09.")
@@ -212,6 +217,22 @@ def make_report(ds: xr.Dataset, fname: str):
         ax.set_ylabel("Height, m")
         ax.legend()
         r.add_mpl_fig(fig, caption="Turbulent kinetic energy over time")
+
+        # TKE budget
+        fig, ax = get_ref_ax(
+            "ref/nn09_fig6.png",
+            (-1, 1),
+            (-50, 2050),
+            trim=(123, 189, 472, 21),  # left, bottom, right, top
+            figsize=(4, 4),
+        )
+        ax.plot(tke_P_S, ds["z"], c="red", lw=1.5)
+        ax.plot(tke_P_B, ds["z"], c="red", lw=1.5, ls="--")
+        # ax.plot(w_tke, ds["zh"])
+        ax.plot(tke_eps, ds["z"], c="red", lw=1.5, ls="-.")  # todo: wrong sign!
+        ax.set_xlim(-1, 1)
+        fig.show()
+        r.add_mpl_fig(fig, caption="TKE budget at 14:00")
 
         # Length scale
         fig, ax = get_ref_ax(
