@@ -74,6 +74,10 @@ class Output:
     mo_traj: MOResult
     t_s: jnp.ndarray
 
+    @property
+    def n_steps(self) -> int:
+        return len(self.t_s)
+
 
 class ModelFn(Protocol[ParamsT]):
     def __call__(
