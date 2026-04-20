@@ -37,7 +37,7 @@ def get_wangara_33(Nz: int = 50) -> Simulation:
     grid = StaggeredGrid(H=2000, Nz=Nz)
 
     ## Surface and model parameters — defined early so they can be reused below
-    mo_settings = MOSettings(z0m=0.01, z0h=0.01)  # Wangara site: flat open paddock, ~0.01 m
+    mo_settings = MOSettings(z0m=0.01, z0h=0.01)  # todo: get good numbers from Hicks (1981)
     params = MYNNParams()
 
     ## Initial conditions
@@ -156,7 +156,7 @@ def make_report(ds: xr.Dataset, fname: str):
     div_w_tke = ds["w_qke"].diff("zh") / ds["zh"].diff("zh")
     div_w_tke = (div_w_tke / tke_scale).sel(time=t_1400)
 
-    with BaseReport(title="GABLS1 Validation", path=fname) as r:
+    with BaseReport(title="Wangara Day 33 Validation", path=fname) as r:
         r.add_text("This report compares the jax-scm model against Wangara Day 33 reference results from NN09.")
 
         # Potential temperature
@@ -263,6 +263,26 @@ def make_report(ds: xr.Dataset, fname: str):
         ax.legend()
         r.add_mpl_fig(fig, caption="MYNN length scale over time")
 
+        # Surface fluxes vs Hicks (1981) observations
+        df_sfc = pd.read_csv("ref/day33_sfc_fluxes_Hicks81.csv")  # todo: probably off
+        df_sfc = df_sfc[(df_sfc["Time"] >= 9) & (df_sfc["Time"] <= 16)]
+        ref_times = pd.to_datetime([f"1967-08-16T{h:02d}:00" for h in df_sfc["Time"]])
+        ref_ust = df_sfc["ust"].values / 100  # cm/s → m/s
+        ref_H = df_sfc["H"].values / (consts.rho_0 * consts.cp)  # W/m² → K m/s
+
+        fig, (ax_ust, ax_hfx) = plt.subplots(nrows=2, sharex=True, figsize=(5, 4), constrained_layout=True)
+        ax_ust.plot(ds["time"], ds["mo_u_st"], **plot_kwargs)
+        ax_ust.plot(ref_times, ref_ust, "ko-", label="Hicks (1981)")
+        ax_ust.set_ylabel(r"$u_*$, m/s")
+        ax_ust.legend()
+
+        ax_hfx.plot(ds["time"], ds["mo_w_th"], **plot_kwargs)
+        ax_hfx.plot(ref_times, ref_H, "ko-", label="Hicks (1981)")
+        ax_hfx.set_ylabel(r"$\overline{w'\theta'}$, K m/s")
+        ax_hfx.set_xlabel("Time (LST)")
+        ax_hfx.legend()
+        r.add_mpl_fig(fig, caption="Surface friction velocity and sensible heat flux vs Hicks (1981)")
+
         # Table 1
         def _annotate_scatter(ax: plt.Axes, label: str):
             # 1:1 line
@@ -307,9 +327,8 @@ def run():
 
 
 if __name__ == "__main__":
-    # with jax.enable_x64():
-    #     run()
-    # run()
+    with jax.enable_x64():
+        run()
 
     ds = xr.open_dataset("wangara_day33.nc")
     make_report(ds, "report.html")
