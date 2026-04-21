@@ -47,10 +47,14 @@ JAX-SCM is a high-performance single-column model (SCM) implemented in JAX, desi
 - **JAX-Native**: Fully differentiable and vectorized implementation.
 - **Metadata-Rich I/O**: Xarray-based data handling with NetCDF output and integrated HTML reporting for simulation diagnostics.
 
+## Ensemble and Optimization
+
+- **Parameter Sweeps**: `jax.vmap` enables efficient ensemble runs over model parameters (e.g., closure constant B1) without looping — see `examples/ensemble/`.
+
 ## Validation
 
 Multiple standard cases from literature are implemented to validate jax-scm:
 
-- GABLS1, stable boundary layer experiment
-- GABLS3 (WIP)
-- Wangarra, day 33 (WIP)
+- GABLS1, stable boundary layer experiment (Cuxart et al. 2006)
+- Andren (1994), neutral boundary layer with geostrophic forcing
+- Wangara, day 33, convective boundary layer initialized with observed profiles

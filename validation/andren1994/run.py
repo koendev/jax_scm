@@ -234,8 +234,8 @@ def make_report(ds: xr.Dataset):
 
 
 if __name__ == "__main__":
-    # with jax.enable_x64():
-    #     run()
+    with jax.enable_x64():
+        run()
 
     ds = xr.open_dataset("andren1994.nc")
     make_report(ds)
