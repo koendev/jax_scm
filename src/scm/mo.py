@@ -124,7 +124,9 @@ class BusingerDyerSimFuncs(MOSimilarityFuncs):
         """
 
         def _phi_m(zeta):
-            x = jnp.maximum((1 - self.gamma_m * zeta), 1e-10) ** (1 / 4)  # exponent is different for m and h
+            x = jnp.maximum((1 - self.gamma_m * zeta), consts.smooth_eps) ** (
+                1 / 4
+            )  # exponent is different for m and h
             return jnp.where(
                 zeta < 0,
                 1 / x,  # unstable
@@ -143,7 +145,9 @@ class BusingerDyerSimFuncs(MOSimilarityFuncs):
         """
 
         def _phi_h(zeta):
-            x = jnp.maximum((1 - self.gamma_h * zeta), 1e-10) ** (1 / 2)  # exponent is different for m and h
+            x = jnp.maximum((1 - self.gamma_h * zeta), consts.smooth_eps) ** (
+                1 / 2
+            )  # exponent is different for m and h
             return jnp.where(
                 zeta < 0,
                 1 / x,  # unstable
@@ -164,7 +168,9 @@ class BusingerDyerSimFuncs(MOSimilarityFuncs):
         """
 
         def _psi_m(zeta):
-            x = jnp.maximum((1 - self.gamma_m * zeta), 1e-10) ** (1 / 4)  # here, exponents are the same for m and h
+            x = jnp.maximum((1 - self.gamma_m * zeta), consts.smooth_eps) ** (
+                1 / 4
+            )  # here, exponents are the same for m and h
             return jnp.where(
                 zeta < 0,
                 2 * jnp.log((1 + x) / 2) + jnp.log((1 + x**2) / 2) - 2 * jnp.atan(x) + jnp.pi / 2,  # unstable
@@ -185,7 +191,9 @@ class BusingerDyerSimFuncs(MOSimilarityFuncs):
         """
 
         def _psi_h(zeta):
-            x = jnp.maximum((1 - self.gamma_h * zeta), 1e-10) ** (1 / 4)  # here, exponents are the same for m and h
+            x = jnp.maximum((1 - self.gamma_h * zeta), consts.smooth_eps) ** (
+                1 / 4
+            )  # here, exponents are the same for m and h
             return jnp.where(
                 zeta < 0,
                 2 * jnp.log((1 + x**2) / 2),  # unstable
@@ -209,8 +217,14 @@ def get_L_obukhov(u_st: jnp.ndarray, w_thv: jnp.ndarray, thv: jnp.ndarray) -> jn
     """Compute Obukhov length based on friction velocity and BOUYANCY flux.
     For numerical stability, clip L to a reasonable range.
     """
-    # Handle neutral case where w_th is zero
-    L = jnp.where(w_thv == 0, jnp.inf, -(thv * u_st**3) / (consts.kappa * consts.g * w_thv))
+    # Safe denominator: AD still differentiates the false-branch expression even when the true-branch is selected,
+    # so we must prevent division by zero there too.
+    w_thv_safe = jnp.where(w_thv == 0, consts.smooth_eps, w_thv)
+    L = jnp.where(
+        w_thv == 0,
+        jnp.inf,
+        -(thv * u_st**3) / (consts.kappa * consts.g * w_thv_safe),
+    )
     return L
 
 
@@ -309,7 +323,7 @@ def init_mo_sfc(
             L = get_L_obukhov(u_st=u_st, w_thv=w_thv, thv=thv_0)
 
             zeta_new = jnp.clip(z / L, min=-10.0, max=20.0)  # update zeta
-            zeta_err = jnp.abs(zeta_new - zeta) / jnp.maximum(jnp.abs(zeta), 1e-10)
+            zeta_err = jnp.abs(zeta_new - zeta) / jnp.maximum(jnp.abs(zeta), consts.smooth_eps)
             zeta = zeta_new
 
         return zeta, zeta_err

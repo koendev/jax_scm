@@ -9,4 +9,10 @@ Rd = 287.0  # J/(kg K)
 
 L_v = 2257e3  # J/kg, latent heat of vaporization of water
 
-qke_min = 1e-10  # minimum TKE to avoid div by zero
+# Physical state floors (applied in clip_state after every step)
+qke_min = 1e-10  # minimum q^2=2*TKE to avoid sqrt(0) in closure
+
+# Numerical guards for differentiability (point-of-use, not in clip_state)
+smooth_eps = 1e-10  # floor for x^(frac<1) expressions to keep ∂f/∂x finite at x→0
+K_min = 1e-6  # minimum eddy diffusivity for CFL denominator
+L_min = 1e-3  # minimum length scale in dissipation denominator

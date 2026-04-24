@@ -35,14 +35,3 @@ levels with centered differences `(u_geo[j+1] - u_geo[j-1]) / (2*dz)` and one-si
 at the boundaries avoids this.
 
 ---
-
-### 3. `clip_state` corrections are not fed back into the tendency computation
-
-**File:** `src/scm/time_stepping/utils.py`
-
-`clip_state` is documented as a numerical floor (done), but clipping `qv ≥ 0` without a
-compensating adjustment to the water vapour budget remains physically inconsistent (negligible
-in dry cases). The `qke` clip to `qke_min` introduces a spurious source of TKE that accumulates
-silently in long runs.
-
-**Fix:** Apply flux-form corrections to conserve moisture when clipping `qv`.

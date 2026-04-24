@@ -221,5 +221,5 @@ def run(cfg: Namelist, name: str):
 
 if __name__ == "__main__":
     with jax.enable_x64():
-        # run(cfg=load_namelist("namelist_cn.yaml"), name="cn")
+        run(cfg=load_namelist("namelist_cn.yaml"), name="cn")
         run(cfg=load_namelist("namelist_ab2.yaml"), name="ab2")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import jax
 from jax import numpy as jnp
 
+from scm import consts
 from scm.config import Namelist
 from scm.interfaces import Simulation, ModelFn, Output, MYNNParams
 from scm.time_stepping.explicit import get_euler_step_fn, get_ab2_step_fn
@@ -31,7 +32,7 @@ def simulate(model: ModelFn, sim: Simulation, cfg: Namelist, params=None) -> Out
         _ab2 = get_ab2_step_fn(model)
 
         def _get_dt(diag):
-            K_max = jnp.clip(jnp.maximum(jnp.max(diag.Km), jnp.max(diag.Kh)), min=1e-6)
+            K_max = jnp.clip(jnp.maximum(jnp.max(diag.Km), jnp.max(diag.Kh)), min=consts.K_min)
             dt = cfg.adaptive_timestep.cfl_max * sim.grid.dz**2 / K_max
             return jnp.minimum(dt, cfg.adaptive_timestep.dt_s_max)
 

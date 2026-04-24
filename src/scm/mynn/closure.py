@@ -71,7 +71,7 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         zeta = grid.zh / mo_res.L
         L_S = jnp.where(
             zeta < 0,
-            consts.kappa * grid.zh * jnp.clip(1 - 100 * zeta, a_min=0.0) ** 0.2,
+            consts.kappa * grid.zh * jnp.clip(1 - 100 * zeta, a_min=consts.smooth_eps) ** 0.2,
             jnp.where(
                 zeta < 1,
                 consts.kappa * grid.zh * (1 + 2.7 * zeta) ** (-1),  # 0 <= zeta < 1
@@ -84,15 +84,19 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
 
         # Buoyance length scale (eq 55, NN09)
         th_0 = th_ref
-        N = jnp.sqrt(jnp.clip(consts.g / th_0 * dthv_dz, a_min=0.0))  # in line after eq 55, NN09
-        q_c = jnp.clip((consts.g / th_0) * mo_res.w_thv * L_T, a_min=0.0) ** (1 / 3)  # in line after eq 55, NN09
+        N = jnp.sqrt(jnp.clip(consts.g / th_0 * dthv_dz, a_min=consts.smooth_eps))  # in line after eq 55, NN09
+        q_c = jnp.clip((consts.g / th_0) * mo_res.w_thv * L_T, a_min=consts.smooth_eps) ** (1 / 3)  # in line after eq 55, NN09
+        # N_safe: used in false-branch of jnp.where to prevent NaN gradients when dthv_dz<=0.
+        # The true-branch returns inf so N never actually divides there, but AD still
+        # differentiates the false-branch expression; N_safe keeps ∂/∂N finite.
+        N_safe = jnp.maximum(N, consts.smooth_eps)
         L_B = jnp.where(
             dthv_dz <= 0,
             jnp.inf,
             jnp.where(
                 zeta >= 0,
-                q / N,
-                (1 + 5 * (q_c / L_T * N) ** (1 / 2)) * q / N,
+                q / N_safe,
+                (1 + 5 * (q_c / L_T * N_safe) ** (1 / 2)) * q / N_safe,
             ),
         )
 
@@ -125,7 +129,7 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         Ri1 = 0.5 * A2 * F2 / (A1 * F1)
         Ri2 = 0.5 * Rf1 / Ri1
         Ri3 = (2 * Rf2 - Rf1) / Ri1
-        Rf = Ri1 * (Ri + Ri2 - (jnp.clip(Ri**2 - Ri3 * Ri + Ri2**2, a_min=0.0)) ** (1 / 2))  # eq A11, NN09
+        Rf = Ri1 * (Ri + Ri2 - (jnp.clip(Ri**2 - Ri3 * Ri + Ri2**2, a_min=consts.smooth_eps)) ** (1 / 2))  # eq A11, NN09
 
         # Level-2 stability functions
         SH2 = 3 * A2 * (gamma1 + gamma2) * (Rfc - Rf) / (1 - Rf)  # eq A4, NN09
@@ -133,7 +137,7 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
 
         # Diagnosed level-2 tke
         q2_sq = B1 * L**2 * SM2 * (1 - Rf) * (grads.u**2 + grads.v**2)  # eq A2, NN09
-        q2 = jnp.sqrt(jnp.clip(q2_sq, a_min=1e-10))  # epsilon avoids grad(sqrt(0))=inf at surface where L=0
+        q2 = jnp.sqrt(jnp.clip(q2_sq, a_min=consts.qke_min))  # floor avoids grad(sqrt(0))=inf at surface where L=0
 
         ## Level-2.5 closure
         alpha_c = jnp.where(q < q2, q / q2, 1.0)  # eq 42, NN09
@@ -145,6 +149,7 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         phi_5 = 6 * alpha_c**2 * A1**2 * G_M  # eq 37, NN09
 
         D25 = phi_2 * phi_4 + phi_5 * phi_3  # eq 31, NN09
+        D25 = jnp.maximum(D25, consts.smooth_eps)  # guard against D25→0 in near-neutral conditions
         SM25 = alpha_c * A1 * (phi_3 - 3 * C1 * phi_4) / D25  # eq 27, NN09
         SH25 = alpha_c * A2 * (phi_2 + 3 * C1 * phi_5) / D25  # eq 28, NN09
 
@@ -205,14 +210,15 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         P_B = consts.g / th_0 * w_thv  # buoyancy production, eq. 5, NN09
         P_B = (P_B[1:] + P_B[:-1]) / 2  # average to full levels
 
-        L_full = (L[1:] + L[:-1]) / 2  # average first to eliminate L=0 at surface leading to div by zero below
+        L_full = (L[1:] + L[:-1]) / 2
+        L_full = jnp.maximum(L_full, consts.L_min)  # guard against L→0 giving infinite dissipation
         eps = state.qke ** (3 / 2) / (B1 * L_full)  # dissipation, eq. 12, NN09 (q^3 = (q^2)^(3/2))
 
         # CT2
         # Simplified to avoid NaN from 0 * inf when L=0, since th_th is proportional to L.
         # ct2 = 3.2 * B1 ** (1 / 3) / B2 * L ** (-2 / 3) * th_th
         # th_th = -lam2 / q * th_w * dth_dz, where lam2 = B2 * L
-        ct2 = -3.2 * B1 ** (1 / 3) * jnp.clip(L, a_min=0.0) ** (1 / 3) / q * w_th * grads.th
+        ct2 = -3.2 * B1 ** (1 / 3) * jnp.clip(L, a_min=consts.smooth_eps) ** (1 / 3) / q * w_th * grads.th
 
         return DiagVarsMYNN(
             u_w=u_w,

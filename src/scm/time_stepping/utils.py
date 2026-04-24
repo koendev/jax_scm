@@ -71,10 +71,14 @@ class IterationTimer:
 
 
 def clip_state(y: ProgVarsMYNN) -> ProgVarsMYNN:
-    """Clip state variables to physically meaningful ranges.
+    """Clip state variables to physical floors after each time step.
 
     This is a numerical floor, not a physical correction — it does not conserve
-    moisture or TKE budgets.  Applied once at the end of every time step.
+    moisture or TKE budgets.  It is intentionally non-differentiable: the zero
+    gradient below the floor is the correct inductive bias for AD-based parameter
+    optimization (parameters that drive the state negative should be penalized, not
+    rewarded).  Differentiability inside the closure is maintained by point-of-use
+    smooth_eps guards, not by softening these clips.
     """
     if hasattr(y, "qke"):
         y = dataclasses.replace(y, qke=jnp.clip(y.qke, min=consts.qke_min))
