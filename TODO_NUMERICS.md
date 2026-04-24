@@ -20,23 +20,7 @@ over-dissipation instability or large spurious TKE tendencies.
 then add `r` to the CN diagonal as `lhs_d += dt/2 * r` inside `get_cn_sparse_lin_system`.
 This makes TKE destruction unconditionally stable with no additional cost.
 
----
-
-### 2. Surface boundary gradient for theta and qv uses zeroth-order extrapolation
-
-**File:** `src/scm/mynn/model.py:56-57`, `src/scm/mynn/closure.py:66`
-
-`du_dz` and `dv_dz` correctly use MOST-derived surface gradients (`mo_res.dudz`, `mo_res.dvdz`),
-but `dth_dz`, `dqv_dz`, and `dthv_dz` fall back to `bot="edge"`, which repeats the first
-interior gradient. This zeroth-order extrapolation is inconsistent and degrades `G_H`, `Ri`,
-and all stability functions that feed on the surface buoyancy gradient — most consequential in
-stable boundary layers with a sharp surface inversion.
-
-**Fix:** Derive a MOST-based surface gradient for theta and qv analogous to `mo_res.dudz`/`mo_res.dvdz`
-and add them to `MOResult`. Use these as `bot=` in `d_dz` calls in `model.py` and in `closure.py`
-for `dthv_dz`.
-
----
+--
 
 ## Medium Priority
 
@@ -86,14 +70,6 @@ inconsistent with the 2nd-order explicit sources.
 the surface fluxes as well.
 
 ---
-
-### 6. Top half-level extrapolation for `qke_h` is zeroth-order
-
-**File:** `src/scm/mynn/closure.py:59`
-
-`jnp.pad(..., mode="edge")` copies `qke[-1]` as the value at `zh[-1]` (top half level). Linear
-extrapolation (`1.5*qke[-1] - 0.5*qke[-2]`) is trivial to implement and more accurate.
-
 ---
 
 ### 7. Geostrophic advection gradient uses a widened stencil

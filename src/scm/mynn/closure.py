@@ -56,8 +56,8 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
 
         # In MYNN, qke (q^2) is 2*TKE not specific humidity!
         qke_sfc = get_qke_sfc(u_st=mo_res.u_st, B1=B1)
-        qke_h = jnp.pad((state.qke[:-1] + state.qke[1:]) / 2, 1, mode="edge")
-        qke_h = qke_h.at[0].set(qke_sfc)  # apply surface BC
+        qke_top_h = 1.5 * state.qke[-1] - 0.5 * state.qke[-2]  # linear extrapolation to top half-level
+        qke_h = jnp.concatenate([jnp.atleast_1d(qke_sfc), (state.qke[:-1] + state.qke[1:]) / 2, jnp.atleast_1d(qke_top_h)])
         q = jnp.sqrt(jnp.clip(qke_h, min=consts.qke_min))  # turbulent velocity scale
 
         # Virtual potential temperature gradient needed for buoyancy terms
