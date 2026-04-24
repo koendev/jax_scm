@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Tuple
-
 import jax
+import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
-from PIL import Image
 
 from scm.config import load_namelist
 from scm.examples.wangara.wangara import get_wangara_day33
@@ -26,33 +24,25 @@ plot_kwargs = {
 }
 
 
-def get_ref_ax(
-    img_path: str,
-    x_lims: Tuple[float, float],
-    y_lims: Tuple[float, float],
-    trim: Tuple[int, int, int, int] | None = None,
-    **fig_kwargs,
-) -> Tuple[plt.Figure, plt.Axes]:
-    # Load image and trim if needed
-    img = Image.open(img_path)
-    if trim is not None:
-        w, h = img.size
-        left, bottom, right, top = trim
-        img = img.crop(
-            (
-                0 + left,
-                0 + top,
-                w - right,
-                h - bottom,
-            )
-        )  # (left, top) to  (right, bottom)
+def read_ref_csv(path: str) -> dict:
+    """Read digitized reference CSV (label row, X/Y row, data...). Returns dict of label -> (x, y) sorted by y."""
+    raw = pd.read_csv(path, header=None)
+    labels = raw.iloc[0].dropna().tolist()
+    data = raw.iloc[2:].astype(float)
+    result = {}
+    for i, label in enumerate(labels):
+        x = data.iloc[:, i * 2].dropna().values
+        y = data.iloc[:, i * 2 + 1].dropna().values
+        order = np.argsort(y)
+        result[label] = (x[order], y[order])
+    return result
 
-    fig, ax = plt.subplots(**fig_kwargs)
 
-    # format: [xmin, xmax, ymin, ymax]
-    ax.imshow(img, extent=(*x_lims, *y_lims), aspect="auto")
-
-    return fig, ax
+def _add_ref_legend(ax: plt.Axes):
+    """Append a dashed proxy entry for NN09 reference to the existing legend."""
+    handles, labels = ax.get_legend_handles_labels()
+    proxy_ref = mlines.Line2D([], [], color="k", lw=1.5, ls="--", alpha=0.8, label="NN09 (ref)")
+    ax.legend(handles=handles + [proxy_ref], labels=labels + ["NN09 (ref)"], fontsize=7)
 
 
 def make_report(ds: xr.Dataset, fname: str):
@@ -79,111 +69,90 @@ def make_report(ds: xr.Dataset, fname: str):
     div_w_tke = ds["w_qke"].diff("zh") / ds["zh"].diff("zh")
     div_w_tke = (div_w_tke / tke_scale).sel(time=t_1400)
 
+    ref_kw = {"linestyle": "--", "linewidth": 1.5, "alpha": 0.8}
+
     with BaseReport(title="Wangara Day 33 Validation", path=fname) as r:
         r.add_text("This report compares the jax-scm model against Wangara Day 33 reference results from NN09.")
 
         # Potential temperature
-        fig, ax = get_ref_ax(
-            "ref/nn09_fig3.png",
-            (2, 18),
-            (-50, 2050),
-            trim=(662, 199, 45, 14),  # left, bottom, right, top
-            figsize=(3, 5),
-        )
-        for i in range(5):
-            ax.plot(ds["th"].isel(time=i) - 273.15, ds["z"], label=t_short[i], color=f"C{i}")
+        ref = read_ref_csv("ref/nn09_fig3.csv")
+        fig, ax = plt.subplots(figsize=(3, 5))
+        for i, t in enumerate(t_short):
+            ax.plot(*ref[t], color=f"C{i}", **ref_kw)
+            ax.plot(ds["th"].isel(time=i) - 273.15, ds["z"], color=f"C{i}", label=t, lw=1.5)
         ax.set_xlabel("Pot. temp, C")
         ax.set_ylabel("Height, m")
-        ax.legend()
+        _add_ref_legend(ax)
         r.add_mpl_fig(fig, caption="Potential temperature over time.")
 
         # Heatflux
-        fig, ax = get_ref_ax(
-            "ref/nn09_fig4.png",
-            (-6e-2, 24e-2),
-            (-50, 2050),
-            trim=(688, 122, 52, 14),  # left, bottom, right, top
-            figsize=(3, 5),
-        )
+        ref = read_ref_csv("ref/nn09_fig4.csv")
+        fig, ax = plt.subplots(figsize=(3, 5))
         for i in range(1, 5):
-            ax.plot(ds["w_thv"].isel(time=i), ds["zh"], label=t_short[i], color=f"C{i}")
-        ax.set_xlabel("Sensible heat flux, K m / s")
+            ax.plot(*ref[t_short[i]], color=f"C{i}", **ref_kw)
+            ax.plot(ds["w_thv"].isel(time=i) * 100, ds["zh"], color=f"C{i}", label=t_short[i], lw=1.5)
+        ax.set_xlabel("Sensible heat flux, 1e-2 K m / s")
         ax.set_ylabel("Height, m")
-        ax.legend()
+        _add_ref_legend(ax)
         r.add_mpl_fig(fig, caption="Sensible heat flux over time")
+
         # Water vapor
-        fig, ax = get_ref_ax(
-            "ref/nn09_fig8.png",
-            (0, 5),
-            (-50, 2050),
-            trim=(730, 124, 34, 20),  # left, bottom, right, top
-            figsize=(3, 5),
-        )
-        for i in range(5):
-            ax.plot(ds["qv"].isel(time=i) * 1000, ds["z"], label=t_short[i], color=f"C{i}")
+        ref = read_ref_csv("ref/nn09_fig8.csv")
+        fig, ax = plt.subplots(figsize=(3, 5))
+        for i, t in enumerate(t_short):
+            ax.plot(*ref[t], color=f"C{i}", **ref_kw)
+            ax.plot(ds["qv"].isel(time=i) * 1000, ds["z"], color=f"C{i}", label=t, lw=1.5)
         ax.set_xlabel("Water vapor, g/kg")
         ax.set_ylabel("Height, m")
-        ax.legend()
+        _add_ref_legend(ax)
         r.add_mpl_fig(fig, caption="Water vapor over time")
 
         # Moisture flux
-        fig, ax = get_ref_ax(
-            "ref/nn09_fig9.png",
-            (-2e-5, 8e-5),
-            (-50, 2050),
-            trim=(738, 127, 36, 17),  # left, bottom, right, top
-            figsize=(3, 5),
-        )
+        ref = read_ref_csv("ref/nn09_fig9.csv")
+        fig, ax = plt.subplots(figsize=(3, 5))
         for i in range(1, 5):
-            ax.plot(ds["w_qv"].isel(time=i), ds["zh"], label=t_short[i], color=f"C{i}")
-        ax.set_xlabel("Moisture flux, g/kg")
+            ax.plot(*ref[t_short[i]], color=f"C{i}", **ref_kw)
+            ax.plot(ds["w_qv"].isel(time=i) * 1e5, ds["zh"], color=f"C{i}", label=t_short[i], lw=1.5)
+        ax.set_xlabel("Moisture flux, 1e-5 g/kg")
         ax.set_ylabel("Height, m")
-        ax.legend()
+        _add_ref_legend(ax)
         r.add_mpl_fig(fig, caption="Moisture flux over time")
 
         # TKE
-        fig, ax = get_ref_ax(
-            "ref/nn09_fig5.png",
-            (0, 3),
-            (-50, 2050),
-            trim=(678, 117, 43, 16),  # left, bottom, right, top
-            figsize=(3, 5),
-        )
+        ref = read_ref_csv("ref/nn09_fig5.csv")
+        fig, ax = plt.subplots(figsize=(3, 5))
         for i in range(1, 5):
-            ax.plot(ds["qke"].isel(time=i) / 2, ds["z"], label=t_short[i], color=f"C{i}")
+            ax.plot(*ref[t_short[i]], color=f"C{i}", **ref_kw)
+            ax.plot(ds["qke"].isel(time=i) / 2, ds["z"], color=f"C{i}", label=t_short[i], lw=1.5)
         ax.set_xlabel("TKE, m^2/s^2")
         ax.set_ylabel("Height, m")
-        ax.legend()
+        _add_ref_legend(ax)
         r.add_mpl_fig(fig, caption="Turbulent kinetic energy over time")
 
-        # TKE budget
-        fig, ax = get_ref_ax(
-            "ref/nn09_fig6.png",
-            (-1, 1),
-            (-50, 2050),
-            trim=(123, 189, 472, 21),  # left, bottom, right, top
-            figsize=(4, 4),
-        )
-        ax.plot(tke_P_S, ds["z"], c="red", lw=1.5)
-        ax.plot(tke_P_B, ds["z"], c="red", lw=1.5, ls="--")
-        ax.plot(div_w_tke.values, ds["z"].values, c="red", lw=1.5, ls=":")
-        ax.plot(-tke_eps, ds["z"], c="red", lw=1.5, ls="-.")  # here negative because sink
+        # TKE budget — CSV columns: S (shear), B (buoyancy), T+P (transport), D (dissipation)
+        ref = read_ref_csv("ref/nn09_fig6.csv")
+        fig, ax = plt.subplots(figsize=(4, 4))
+        ax.plot(*ref["S"], color="C0", **ref_kw)
+        ax.plot(*ref["B"], color="C1", **ref_kw)
+        ax.plot(*ref["T+P"], color="C2", **ref_kw)
+        ax.plot(*ref["D"], color="C3", **ref_kw)
+        ax.plot(tke_P_S, ds["z"], color="C0", lw=1.5, label="Shear (S)")
+        ax.plot(tke_P_B, ds["z"], color="C1", lw=1.5, label="Buoyancy (B)")
+        ax.plot(div_w_tke.values, ds["z"].values, color="C2", lw=1.5, label="Transport (T)")
+        ax.plot(-tke_eps, ds["z"], color="C3", lw=1.5, label="Dissipation (-D)")
         ax.set_xlim(-1, 1)
+        _add_ref_legend(ax)
         r.add_mpl_fig(fig, caption="TKE budget at 14:00")
 
         # Length scale
-        fig, ax = get_ref_ax(
-            "ref/nn09_fig7.png",
-            (0, 250),
-            (-50, 2050),
-            trim=(725, 125, 30, 14),  # left, bottom, right, top
-            figsize=(3, 5),
-        )
+        ref = read_ref_csv("ref/nn09_fig7.csv")
+        fig, ax = plt.subplots(figsize=(3, 5))
         for i in range(1, 5):
-            ax.plot(ds["L"].isel(time=i), ds["zh"], label=t_short[i], color=f"C{i}")
+            ax.plot(*ref[t_short[i]], color=f"C{i}", **ref_kw)
+            ax.plot(ds["L"].isel(time=i), ds["zh"], color=f"C{i}", label=t_short[i], lw=1.5)
         ax.set_xlabel("Length scale, m")
         ax.set_ylabel("Height, m")
-        ax.legend()
+        _add_ref_legend(ax)
         r.add_mpl_fig(fig, caption="MYNN length scale over time")
 
         # Surface fluxes vs Hicks (1981) observations
@@ -251,7 +220,8 @@ def run():
 
 if __name__ == "__main__":
     with jax.enable_x64():
-        run()
+        # run()
+        pass
 
     ds = xr.open_dataset("wangara_day33.nc")
     make_report(ds, "report_wangara.html")
