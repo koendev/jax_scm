@@ -6,7 +6,7 @@ import numpy as np
 import xarray as xr
 
 from PIL import Image
-from scm.config import load_namelist
+from scm.config import load_namelist, Namelist
 from scm.examples.andren1994.andren1994 import get_andren1994
 from scm.io.local import out_to_ds
 from scm.mo import MOSettings
@@ -50,21 +50,12 @@ def get_ref_ax(
     return fig, ax
 
 
-def run():
-    sim = get_andren1994(Nz=100)
-    cfg = load_namelist("namelist_cn.yaml")
-    model = init_model(sim, cfg)
-    out = simulate(model=model, sim=sim, cfg=cfg)
-    ds = out_to_ds(out, sim)
-    ds.to_netcdf("andren1994.nc")
-
-
-def make_report(ds: xr.Dataset):
+def make_report(ds: xr.Dataset, fname: str):
     f = ds["frc_f_c"].item()
     tf = ds["time"] * f
     mo_settings = MOSettings.deserialize(ds.attrs["mo_settings"])
 
-    with BaseReport(title="Andren 1994 Validation", path="report_andren1994.html") as r:
+    with BaseReport(title="Andren 1994 Validation", path=fname) as r:
         r.add_text("Comparison of jax-scm against Andren et al. (1994) for neutral boundary layer.")
 
         # Fig 2: Normalized vertically integrated TKE
@@ -187,9 +178,18 @@ def make_report(ds: xr.Dataset):
         r.add_mpl_fig(fig, caption="Fig 6b: Normalized v-momentum flux profile")
 
 
+def run(cfg: Namelist, name: str):
+    sim = get_andren1994(Nz=100)
+    model = init_model(sim, cfg)
+    out = simulate(model=model, sim=sim, cfg=cfg)
+    ds = out_to_ds(out, sim)
+    out_file = f"out_{name}.nc"
+    ds.to_netcdf(out_file)
+    print(f"Written to {out_file}")
+    make_report(ds, fname=f"report_andren1994_{name}.html")
+
+
 if __name__ == "__main__":
     with jax.enable_x64():
-        run()
-
-    ds = xr.open_dataset("andren1994.nc")
-    make_report(ds)
+        run(cfg=load_namelist("namelist_cn.yaml"), name="cn")
+        run(cfg=load_namelist("namelist_ab2.yaml"), name="ab2")

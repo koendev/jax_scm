@@ -42,10 +42,22 @@ CASES = {
         namelist="namelist_cn.yaml",
         get_sim=lambda: get_andren1994(Nz=100),
     ),
+    "andren1994_ab2": CaseSpec(
+        fixture_dir="andren1994",
+        out_file="out_ab2.nc",
+        namelist="namelist_ab2.yaml",
+        get_sim=lambda: get_andren1994(Nz=100),
+    ),
     "wangara_cn": CaseSpec(
         fixture_dir="wangara",
         out_file="out_cn.nc",
         namelist="namelist_cn.yaml",
+        get_sim=lambda: get_wangara_day33(Nz=100),
+    ),
+    "wangara_ab2": CaseSpec(
+        fixture_dir="wangara",
+        out_file="out_ab2.nc",
+        namelist="namelist_ab2.yaml",
         get_sim=lambda: get_wangara_day33(Nz=100),
     ),
 }

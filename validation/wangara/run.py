@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from scm.config import load_namelist
+from scm.config import load_namelist, Namelist
 from scm.examples.wangara.wangara import get_wangara_day33
 from scm.io.local import out_to_ds
 from scm.mynn.model import init_model
@@ -177,14 +177,11 @@ def make_report(ds: xr.Dataset, fname: str):
 
         # Table 1
         def _annotate_scatter(ax: plt.Axes, label: str):
-            # 1:1 line
             xmin, xmax = ax.get_xlim()
             ymin, ymax = ax.get_ylim()
             vmin = min(xmin, ymin)
             vmax = max(xmax, ymax)
             ax.plot([vmin, vmax], [vmin, vmax], "k--")
-
-            # Annotate axis
             ax.set_xlabel(f"Ref {label}")
             ax.set_ylabel(f"jax-scm {label}")
 
@@ -201,9 +198,8 @@ def make_report(ds: xr.Dataset, fname: str):
         r.add_mpl_fig(fig, caption="Mixed layer parameters")
 
 
-def run():
+def run(cfg: Namelist, name: str):
     sim = get_wangara_day33(Nz=100)
-    cfg = load_namelist("namelist_cn.yaml")
     model = init_model(sim, cfg)
     out = simulate(model=model, sim=sim, cfg=cfg)
     ds = out_to_ds(
@@ -215,13 +211,15 @@ def run():
             periods=out.n_steps,
         ),
     )
-    ds.to_netcdf("wangara_day33.nc")
+    out_file = f"out_{name}.nc"
+    ds.to_netcdf(out_file)
+    print(f"Written to {out_file}")
+
+    ds = xr.open_dataset(out_file)  # for whatever reason, we need to reopen the file to avoid `VectorIndexing` error.
+    make_report(ds, fname=f"report_wangara_{name}.html")
 
 
 if __name__ == "__main__":
     with jax.enable_x64():
-        # run()
-        pass
-
-    ds = xr.open_dataset("wangara_day33.nc")
-    make_report(ds, "report_wangara.html")
+        # run(cfg=load_namelist("namelist_cn.yaml"), name="cn")
+        run(cfg=load_namelist("namelist_ab2.yaml"), name="ab2")
