@@ -1,27 +1,13 @@
 from __future__ import annotations
 
 from typing import Tuple
-import dataclasses
-from PIL import Image
-import matplotlib.pyplot as plt
-from scm.forcing.era5 import get_era5_sim
-import xarray as xr
-from scm.grid import StaggeredGrid
-from scm.forcing.interp import interp_dtindex
-
-import pathlib
-from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import xarray as xr
 from PIL import Image, ImageOps
 
-from scm.config import load_namelist
-from scm.examples.gabls1 import get_gabls1
-from scm.io.local import out_to_ds
-from scm.mynn.model import init_model
 from scm.reporter import BaseReport
-from scm.time_stepping import simulate
 
 plot_kwargs = {
     "color": "C1",
@@ -62,39 +48,7 @@ def get_ref_ax(
     return fig, ax
 
 
-def run():
-    # Setup simulation for GABLS3 case from ERA5
-    sim = get_era5_sim(
-        name="ERA5 Test Simulation",
-        lat_deg=52.0,
-        lon_deg=5.0,
-        time_slice=("2006-07-01T11:00", "2006-07-02T12:00"),
-        grid=StaggeredGrid(Nz=200, H=3000.0),
-        source="cds",
-        cache_dir="./era5",
-    )
-    # sim.forcing = dataclasses.replace(sim.forcing, ls_tends=None)  # disable large-scale tendencies
-
-    # Load config and run simulation
-    cfg = load_namelist("namelist_cn.yaml")
-    model = init_model(sim, cfg=cfg)
-    out = simulate(model=model, sim=sim, cfg=cfg)
-
-    # Save output
-    out_file = pathlib.Path(f"out.nc")
-    ds = out_to_ds(
-        out=out,
-        sim=sim,
-        time=interp_dtindex(t_s=np.array(out.t_s), idx=sim.t_index).round("1min"),
-    )
-    ds.to_netcdf(out_file)
-    print("Written to disk.")
-    return ds
-
-
-if __name__ == "__main__":
-    ds = run()
-    # ds = xr.open_dataset("out.nc")
+def make_report(ds: xr.Dataset, out_file: str):
     ds = ds.sel(time=slice("2006-07-01T12:00", "2006-07-02T12:00"))  # exclude spinup
 
     ds["m"] = np.sqrt(ds["u"] ** 2 + ds["v"] ** 2)
@@ -102,7 +56,7 @@ if __name__ == "__main__":
     z = ds["z"].values
     t_h = np.linspace(0, 24, ds.sizes["time"])
 
-    with BaseReport(title="GABLS3 Validation", path=f"val_gabls3.html") as r:
+    with BaseReport(title="GABLS3 Validation", path=out_file) as r:
         r.add_text(
             "This report compares the jax-scm model against GABLS3 reference results from Bosveld et al. (2014). "
             "Instead of using the prescribed initial and boundary conditions from the paper, we use ERA5 data."
@@ -307,3 +261,19 @@ if __name__ == "__main__":
         ax.set_yticks(np.arange(0, 0.71, 0.1))
         ax.legend()
         r.add_mpl_fig(fig, caption="Surface friction velocity")
+
+
+if __name__ == "__main__":
+    # ERA5-based simulation output
+    ds = xr.open_dataset("run_era5/out_lf.nc")
+    make_report(ds, "report_era5_lf.html")
+
+    ds = xr.open_dataset("run_era5/out_no_lf.nc")
+    make_report(ds, "report_era5_no_lf.html")
+
+    # Manual simulation output
+    ds = xr.open_dataset("run_manual/out_100_lf.nc")
+    make_report(ds, "report_manual_lf.html")
+
+    ds = xr.open_dataset("run_manual/out_100_no_lf.nc")
+    make_report(ds, "report_manual_no_lf.html")

@@ -1,20 +1,19 @@
 import jax
 import jax.numpy as jnp
-
 import matplotlib.pyplot as plt
 import pandas as pd
 
 from scm import consts
 from scm import convert
+from scm.config import load_namelist
 from scm.forcing.interp import get_ts_interp_fn
-from scm.interfaces import Simulation, Forcing
-from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN
-from scm.mynn.model import init_model
 from scm.grid import StaggeredGrid
-from scm.time_stepping.base import simulate_adaptive_dt
-from scm.mo import MOSettings, BusingerDyerAltSimFuncs
-
+from scm.interfaces import Simulation, Forcing
 from scm.io.local import out_to_ds
+from scm.mo import MOSettings, BusingerDyerAltSimFuncs
+from scm.mynn.interfaces import ProgVarsMYNN
+from scm.mynn.model import init_model
+from scm.time_stepping.base import simulate
 
 
 def expand_array(a: jnp.ndarray, z_mask: jnp.ndarray, Nt: int, Nz: int) -> jnp.ndarray:
@@ -25,7 +24,7 @@ def expand_array(a: jnp.ndarray, z_mask: jnp.ndarray, Nt: int, Nz: int) -> jnp.n
     return a_exp
 
 
-def get_gabls3(Nz: int = 64, plot: bool = False, random_seed: int = 0) -> Simulation[ProgVarsMYNN, DiagVarsMYNN]:
+def get_gabls3(use_lf: bool, Nz: int = 100, plot: bool = False) -> Simulation:
     """Get a GABLS3 simulation setup.
 
     References
@@ -44,7 +43,7 @@ def get_gabls3(Nz: int = 64, plot: bool = False, random_seed: int = 0) -> Simula
     )
 
     ## Grid
-    grid = StaggeredGrid(H=4000, Nz=Nz)  # expecting BLH of 2000m
+    grid = StaggeredGrid(H=3000, Nz=Nz)  # expecting BLH of 2000m
 
     ## Initial conditions
     # Initial wind profile
@@ -212,7 +211,6 @@ def get_gabls3(Nz: int = 64, plot: bool = False, random_seed: int = 0) -> Simula
     u_adv_fn = get_ts_interp_fn(time_s=time_h * 3600, data=u_adv)
     v_adv_fn = get_ts_interp_fn(time_s=time_h * 3600, data=v_adv)
 
-    @jax.jit
     def ls_tends_fn(t_s: jnp.ndarray, state: ProgVarsMYNN, grads: ProgVarsMYNN, _) -> ProgVarsMYNN:
         w = w_fn(t_s)
         dth_dz_mean = (grads.th[1:] + grads.th[:-1]) / 2  # mean dth/dz at full levels
@@ -248,33 +246,41 @@ def get_gabls3(Nz: int = 64, plot: bool = False, random_seed: int = 0) -> Simula
         f_c=convert.get_fc(lat_deg=51.9711),  # Cabauw
         w_qv_s=w_qv_s_fn,
         w_th_s=w_th_s_fn,
-        ls_tends=ls_tends_fn,
+        ls_tends=ls_tends_fn if use_lf else None,
     )
 
     return Simulation(
-        name="GABLS3",
+        name="GABLS3_manual",
         grid=grid,
         init=init,
         forcing=forcing,
         mo_settings=mo_settings,
         t_start_s=0,
         t_end_s=24 * 60 * 60,
+        th_ref=273.15 + 20.0,
     )
+
+
+def run(use_lf: bool):
+    cfg = load_namelist("namelist_cn.yaml")
+    sim = get_gabls3(use_lf, Nz=100, plot=True)
+    model = init_model(sim, cfg)
+    out = simulate(model=model, sim=sim, cfg=cfg)
+
+    # Save output
+    ds = out_to_ds(
+        out,
+        sim,
+        time=pd.date_range(
+            "2006-07-01T12:00",
+            freq=f"{cfg.dt_s_out:.0f}s",
+            periods=out.n_steps,
+        ),
+    )
+    ds.to_netcdf(f"out_{sim.grid.Nz}_{'lf' if use_lf else 'no_lf'}.nc")
+    print("Written to disk.")
 
 
 if __name__ == "__main__":
-    sim = get_gabls3(400, plot=True)
-    model = init_model(sim)
-    state_hist, diag_hist, mo_hist, t = simulate_adaptive_dt(
-        model=model,
-        sim=sim,
-        dt_s_init=0.001,
-        dt_s_max=1,
-        cfl_max=0.05,
-        dt_s_out=60 * 5,
-    )
-
-    # Save output
-    ds = out_to_ds(state_hist, diag_hist, mo_hist, time=t / 60 / 60, grid=sim.grid)
-    ds.to_netcdf(f"out_{sim.grid.Nz}.nc")
-    print("Written to disk.")
+    run(use_lf=True)
+    run(use_lf=False)
