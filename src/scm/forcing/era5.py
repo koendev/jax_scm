@@ -96,7 +96,7 @@ def _get_sim_from_ls2d(
         "central_lat": lat_deg,
         "central_lon": lon_deg,
         "area_size": 1,
-        "case_name": "cabauw",
+        "case_name": name,
         "era5_path": str(cache_dir),
         "era5_expver": 1,  # 1=normal ERA5, 5=ERA5 near-realtime
         "start_date": start,
