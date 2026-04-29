@@ -1,6 +1,8 @@
+from typing import Callable
 import pathlib
 
 import jax
+import dataclasses
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -17,7 +19,7 @@ plt.rcParams.update(
         # "text.latex.preamble": r"\usepackage{amsmath}",
         "figure.dpi": 300,
         # "figure.labelsize": 8,
-        "lines.linewidth": 0.75,
+        "lines.linewidth": 1.0,
         "hatch.linewidth": 0.5,
     }
 )
@@ -51,42 +53,70 @@ UNITS = {
     "w_th": "K m s$^{-1}$",
     "w_qv": "g/kg m s$^{-1}$",
 }
-SHORT_NAMES = {
-    "Andren1994": "A94",
-    "GABLS1": "GAB1",
-    "Wangara_Day33": "WG33",
-}
 
 FIG_ROOT = pathlib.Path("figures")
+
+
+@dataclasses.dataclass
+class SimDrawSpec:
+    sim: Simulation
+    short_name: str
+    time_formatter: Callable[[float], str]
+    time_label: str = "Time, s"
+    time_n_ticks: int = 5
+
 
 # Global simulation objects for plotting
 sim_a94 = get_andren1994()
 sim_gab1 = get_gabls1()
 sim_wg33 = get_wangara_day33()
-sims = [sim_a94, sim_gab1, sim_wg33]
+sims = [
+    SimDrawSpec(
+        sim=sim_a94,
+        short_name="A94",
+        time_formatter=lambda t: f"{t * sim_a94.forcing.f_c:.0f}",
+        time_n_ticks=6,
+        time_label="Time, f$^{-1}$",
+    ),
+    SimDrawSpec(
+        sim=sim_gab1,
+        short_name="GAB1",
+        time_formatter=lambda t: f"{t/3600:.0f}",
+        time_label="Time, h",
+        time_n_ticks=10,
+    ),
+    SimDrawSpec(
+        sim=sim_wg33,
+        short_name="WG33",
+        time_formatter=lambda t: f"{t/3600:02.0f}",
+        time_label="Time, LST",
+        time_n_ticks=8,
+    ),
+]
 
 
 def _add_is_const(v: jnp.ndarray, ax: plt.Axes) -> None:
     """Add 'constant' label if plotted variable is constant"""
-    if v.std() < 1e-5:
-        if v.mean() == 0:
-            label = "zero"
-        else:
-            label = "constant"
+    if v.mean() == 0:
+        label = "zero"
+    elif jnp.abs(v.std() / v.mean()) < 1e-5:
+        label = "constant"
+    else:
+        return
 
-        ax.text(
-            0.99,
-            0.99,
-            label,
-            transform=ax.transAxes,
-            ha="right",
-            va="top",
-            fontsize=6,
-            color="gray",
-        )
+    ax.text(
+        0.99,
+        0.99,
+        label,
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=6,
+        color="gray",
+    )
 
 
-def plot_ic(sim: Simulation, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
+def plot_ic(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     """Plot initial conditions."""
     ic_gs = gs.subgridspec(nrows=1, ncols=4)
     ax_uv = fig.add_subplot(ic_gs[0, 0])
@@ -94,6 +124,7 @@ def plot_ic(sim: Simulation, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     ax_qv = fig.add_subplot(ic_gs[0, 2], sharey=ax_uv)
     ax_qke = fig.add_subplot(ic_gs[0, 3], sharey=ax_uv)
 
+    sim = sds.sim
     ax_uv.plot(sim.init.u, sim.grid.z, label="u", color=COLORS["u"])
     ax_uv.plot(sim.init.v, sim.grid.z, label="v", color=COLORS["v"])
     _add_is_const(v=sim.init.u, ax=ax_uv)
@@ -105,7 +136,7 @@ def plot_ic(sim: Simulation, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     ax_th.set_xlabel(f"{LABELS_PRETTY['th']}, {UNITS['th']}")
 
     ax_qv.plot(sim.init.qv * 100, sim.grid.z, label="qv", color=COLORS["qv"])
-    _add_is_const(v=sim.init.qv, ax=ax_th)
+    _add_is_const(v=sim.init.qv, ax=ax_qv)
     ax_qv.set_xlim(0, None)
     ax_qv.set_xlabel(f"{LABELS_PRETTY['qv']}, {UNITS['qv']}")
 
@@ -120,7 +151,7 @@ def plot_ic(sim: Simulation, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
         ax.tick_params(axis="y", which="both", left=False, labelleft=False)
 
 
-def plot_bc(sim: Simulation, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
+def plot_bc(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     """Plot boundary conditions (i.e. time-varying forcing)."""
     row_gs = gs.subgridspec(
         nrows=2,
@@ -132,12 +163,18 @@ def plot_bc(sim: Simulation, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     ax_heat = fig.add_subplot(row_gs[0, 1])
     ax_w_qv = fig.add_subplot(row_gs[1, 1], sharex=ax_heat)
 
+    sim = sds.sim
     t = jnp.linspace(sim.t_start_s, sim.t_end_s)
+    t_ticks = jnp.linspace(sim.t_start_s, sim.t_end_s, sds.time_n_ticks)
+    t_ticks_ug = jnp.linspace(sim.t_start_s, sim.t_end_s, 3)
 
     # Geostrophic forcing
     ug = jax.vmap(sim.forcing.u_geo)(t)
     pc = ax_ug.pcolormesh(t, sim.grid.z, ug.T, shading="auto", cmap="Blues", rasterized=True)
     _add_is_const(v=ug, ax=ax_ug)
+    ax_ug.set_xticks(t_ticks_ug)
+    ax_ug.set_xticklabels([sds.time_formatter(tick) for tick in t_ticks_ug])
+    ax_ug.set_xlabel(sds.time_label)
     ax_ug.set_ylabel("Height, m")
     ax_ug.set_ylim(0, sim.grid.H)
     fig.colorbar(pc, ax=ax_ug)
@@ -157,29 +194,34 @@ def plot_bc(sim: Simulation, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     ax_heat.plot(t, heat, color=COLORS["th"])
     ax_heat.set_ylabel(f"{label}, {unit}")
     ax_heat.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
+    ax_heat.margins(x=0)
     _add_is_const(v=heat, ax=ax_heat)
 
     # Moisture forcing
     w_qv = jax.vmap(sim.forcing.w_qv_s)(t) * 1e3
     ax_w_qv.plot(t, w_qv, label="w_qv", color=COLORS["qv"])
-    ax_w_qv.set_xlabel("Time, s")
-    ax_w_qv.set_ylabel(f"{LABELS_PRETTY['w_qv']}, {UNITS['w_qv']}")
     _add_is_const(v=w_qv, ax=ax_w_qv)
 
+    ax_w_qv.margins(x=0)
+    ax_w_qv.set_xlabel(sds.time_label)
+    ax_w_qv.set_xticks(t_ticks)
+    ax_w_qv.set_xticklabels([sds.time_formatter(tick) for tick in t_ticks])
 
-def plot_ic_bc(sim: Simulation) -> plt.Figure:
+    ax_w_qv.set_ylabel(f"{LABELS_PRETTY['w_qv']}, {UNITS['w_qv']}")
+
+
+def plot_ic_bc(sds: SimDrawSpec) -> plt.Figure:
     """Plot initial conditions and boundary conditions for a given simulation."""
     fig = plt.figure(constrained_layout=True, figsize=(4, 3))
     outer_gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=(1, 1))
 
-    plot_ic(sim, fig, outer_gs[0])
-    plot_bc(sim, fig, outer_gs[1])
+    plot_ic(sds, fig, outer_gs[0])
+    plot_bc(sds, fig, outer_gs[1])
 
     return fig
 
 
 if __name__ == "__main__":
     for sim in sims:
-        name = SHORT_NAMES[sim.name]
         fig_ic_bc = plot_ic_bc(sim)
-        fig_ic_bc.savefig(FIG_ROOT / f"ic_bc_{name}.pdf")
+        fig_ic_bc.savefig(FIG_ROOT / f"ic_bc_{sim.short_name}.pdf")
