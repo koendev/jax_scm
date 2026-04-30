@@ -5,7 +5,10 @@ import jax
 import dataclasses
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
+import xarray as xr
 
 from scm.examples import get_andren1994, get_wangara_day33, get_gabls1
 from scm.interfaces import Simulation
@@ -55,6 +58,28 @@ UNITS = {
 }
 
 FIG_ROOT = pathlib.Path("figures")
+A94_REF = pathlib.Path(__file__).parent.parent / "andren1994" / "ref"
+A94_OUT = pathlib.Path(__file__).parent.parent / "andren1994" / "out_cn.nc"
+
+
+def _read_ref_csv(path: pathlib.Path, sort: str = "x") -> dict:
+    """Read digitized reference CSV (label row, X/Y row, data...). Returns dict label -> (x, y)."""
+    raw = pd.read_csv(path, header=None)
+    labels = raw.iloc[0].dropna().tolist()
+    data = raw.iloc[2:].astype(float)
+    result = {}
+    for i, label in enumerate(labels):
+        x = data.iloc[:, i * 2].dropna().values
+        y = data.iloc[:, i * 2 + 1].dropna().values
+        order = np.argsort(x) if sort == "x" else np.argsort(y)
+        result[label] = (x[order], y[order])
+    return result
+
+
+def _plot_ref(ax: plt.Axes, path: pathlib.Path, sort: str = "x") -> None:
+    """Overplot digitized reference curves on ax."""
+    for label, (x, y) in _read_ref_csv(path, sort=sort).items():
+        ax.plot(x, y, label=label, color="k", lw=0.75)
 
 
 @dataclasses.dataclass
@@ -219,7 +244,97 @@ def plot_ic_bc(sds: SimDrawSpec) -> plt.Figure:
     return fig
 
 
+def plot_a94_res(ds: xr.Dataset) -> plt.Figure:
+    """Plot Andren 1994 results (Figs 2, 3a/b, 4a, 6a/b) against digitized reference data."""
+    from scm import consts
+    from scm.mo import MOSettings
+
+    f = ds["frc_f_c"].item()
+    tf = ds["time"] * f
+    mo_settings = MOSettings.deserialize(ds.attrs["mo_settings"])
+
+    ds_sub = ds.sel(time=slice(7 / f, None)).mean("time")
+    u_st = float(ds_sub["mo_u_st"])
+    zh_norm = ds_sub["zh"] * f / u_st
+
+    # phi_m profile: insert surface BC at z0h for proper log-law gradient near surface
+    u = np.insert(ds_sub["u"].values, 0, 0)
+    v = np.insert(ds_sub["v"].values, 0, 0)
+    z = np.insert(ds_sub["z"].values, 0, mo_settings.z0h)
+    zh_log = np.diff(z) / np.log(z[1:] / z[:-1])
+    dz = np.diff(z)
+    phi_m = consts.kappa * zh_log / u_st * np.sqrt(((u[1:] - u[:-1]) / dz) ** 2 + ((v[1:] - v[:-1]) / dz) ** 2)
+
+    fig, axes = plt.subplots(2, 3, figsize=(7, 5), constrained_layout=True)
+    jax_kw = dict(color="C1", lw=1, label="jax-scm")
+
+    # --- Row 0: time series ---
+    # Fig 2: normalized vertically integrated TKE
+    tke_norm = f / ds["mo_u_st"] ** 3 * np.trapezoid(y=ds["qke"] / 2, x=ds["z"])
+    _plot_ref(axes[0, 0], A94_REF / "a94_fig2.csv")
+    axes[0, 0].plot(tf, tke_norm, **jax_kw)
+    axes[0, 0].set_xlabel("$tf$")
+    axes[0, 0].set_xlim(0, 10)
+    axes[0, 0].set_ylim(0, 1.25)
+    axes[0, 0].set_yticks(np.arange(0, 1.6, 0.25))
+    axes[0, 0].set_ylabel(r"$f \int q^2/2 \, dz \; / \; u_*^3$")
+
+    # Fig 3a: C_u
+    C_u = -f / ds["mo_u_w"] * np.trapezoid(y=ds["v"] - ds["frc_v_geo"], x=ds["z"])
+    _plot_ref(axes[0, 1], A94_REF / "a94_fig3a.csv")
+    axes[0, 1].plot(tf, C_u, **jax_kw)
+    axes[0, 1].set_xlabel("$tf$")
+    axes[0, 1].set_xlim(0, 10)
+    axes[0, 1].set_ylim(0, 1.75)
+    axes[0, 1].set_ylabel(r"$C_u$")
+
+    # Fig 3b: C_v
+    C_v = f / ds["mo_v_w"] * np.trapezoid(y=ds["u"] - ds["frc_u_geo"], x=ds["z"])
+    _plot_ref(axes[0, 2], A94_REF / "a94_fig3b.csv")
+    axes[0, 2].plot(tf, C_v, **jax_kw)
+    axes[0, 2].set_xlabel("$tf$")
+    axes[0, 2].set_xlim(0, 10)
+    axes[0, 2].set_ylim(0, 3)
+    axes[0, 2].set_ylabel(r"$C_v$")
+
+    # --- Row 1: vertical profiles (time-averaged over last 3/f) ---
+    # Fig 4a: phi_M gradient function
+    _plot_ref(axes[1, 0], A94_REF / "a94_fig4a.csv", sort="y")
+    axes[1, 0].plot(phi_m, zh_log * f / u_st, **jax_kw)
+    axes[1, 0].axvline(1, color="k", ls="--", lw=0.75)
+    axes[1, 0].set_xlabel(r"$\Phi_M$")
+    axes[1, 0].set_xlim(0, 2)
+    axes[1, 0].set_ylabel(r"$zf/u_*$")
+    axes[1, 0].set_ylim(0, 0.1)
+
+    # Fig 6a: u-momentum flux
+    _plot_ref(axes[1, 1], A94_REF / "a94_fig6a.csv", sort="y")
+    axes[1, 1].plot(ds_sub["u_w"] / u_st**2, zh_norm, **jax_kw)
+    axes[1, 1].axvline(0, color="k", ls="--", lw=0.75)
+    axes[1, 1].set_xlabel(r"$\overline{uw}/u_*^2$")
+    axes[1, 1].set_ylabel(r"$zf/u_*$")
+    axes[1, 1].set_ylim(0, 0.35)
+
+    # Fig 6b: v-momentum flux
+    _plot_ref(axes[1, 2], A94_REF / "a94_fig6b.csv", sort="y")
+    axes[1, 2].plot(ds_sub["v_w"] / u_st**2, zh_norm, **jax_kw)
+    axes[1, 2].axvline(0, color="k", ls="--", lw=0.75)
+    axes[1, 2].set_xlabel(r"$\overline{vw}/u_*^2$")
+    axes[1, 2].set_ylabel(r"$zf/u_*$")
+    axes[1, 2].set_ylim(0, 0.35)
+
+    # shared legend (reference models vs jax-scm) from last axes
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="outside lower center", ncol=len(handles), fontsize=7)
+
+    return fig
+
+
 if __name__ == "__main__":
     for sim in sims:
         fig_ic_bc = plot_ic_bc(sim)
         fig_ic_bc.savefig(FIG_ROOT / f"ic_bc_{sim.short_name}.pdf")
+
+    ds_a94 = xr.open_dataset(A94_OUT)
+    fig_a94 = plot_a94_res(ds_a94)
+    fig_a94.savefig(FIG_ROOT / "res_A94.pdf")
