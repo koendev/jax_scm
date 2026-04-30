@@ -34,10 +34,10 @@ COLORS = {
 }
 
 LABELS_PRETTY = {
-    "u": "$u$",
-    "v": "$v$",
-    "th": r"$\theta$",
-    "qv": r"$q_v$",
+    "u": "$U$",
+    "v": "$V$",
+    "th": r"$\Theta$",
+    "qv": r"$Q_v$",
     "qke": r"$q^2$",
     "th_s": r"$\theta_s$",
     "w_th": r"$\langle w \theta \rangle$",
@@ -95,7 +95,7 @@ sims = [
 ]
 
 
-def _add_is_const(v: jnp.ndarray, ax: plt.Axes) -> None:
+def _add_is_const(v: jnp.ndarray, ax: plt.Axes, x: float = 0.95, y: float = 0.95, color: str = "grey") -> None:
     """Add 'constant' label if plotted variable is constant"""
     if v.mean() == 0:
         label = "zero"
@@ -104,16 +104,14 @@ def _add_is_const(v: jnp.ndarray, ax: plt.Axes) -> None:
     else:
         return
 
-    ax.text(
-        0.99,
-        0.99,
-        label,
-        transform=ax.transAxes,
-        ha="right",
-        va="top",
-        fontsize=6,
-        color="gray",
-    )
+    if x == 0.5:
+        ha = "center"
+    elif x < 0.5:
+        ha = "left"
+    else:
+        ha = "right"
+
+    ax.text(x, y, label, transform=ax.transAxes, ha=ha, va="top", fontsize=6, color=color)
 
 
 def plot_ic(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
@@ -127,16 +125,16 @@ def plot_ic(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     sim = sds.sim
     ax_uv.plot(sim.init.u, sim.grid.z, label="u", color=COLORS["u"])
     ax_uv.plot(sim.init.v, sim.grid.z, label="v", color=COLORS["v"])
-    _add_is_const(v=sim.init.u, ax=ax_uv)
+    _add_is_const(v=sim.init.u, ax=ax_uv, x=0.5)
     ax_uv.legend()
     ax_uv.set_xlabel(f"Wind, {UNITS['u']}")
 
     ax_th.plot(sim.init.th, sim.grid.z, label="th", color=COLORS["th"])
-    _add_is_const(v=sim.init.th, ax=ax_th)
+    _add_is_const(v=sim.init.th, ax=ax_th, x=0.5)
     ax_th.set_xlabel(f"{LABELS_PRETTY['th']}, {UNITS['th']}")
 
     ax_qv.plot(sim.init.qv * 100, sim.grid.z, label="qv", color=COLORS["qv"])
-    _add_is_const(v=sim.init.qv, ax=ax_qv)
+    _add_is_const(v=sim.init.qv, ax=ax_qv, x=0.5)
     ax_qv.set_xlim(0, None)
     ax_qv.set_xlabel(f"{LABELS_PRETTY['qv']}, {UNITS['qv']}")
 
@@ -171,13 +169,13 @@ def plot_bc(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     # Geostrophic forcing
     ug = jax.vmap(sim.forcing.u_geo)(t)
     pc = ax_ug.pcolormesh(t, sim.grid.z, ug.T, shading="auto", cmap="Blues", rasterized=True)
-    _add_is_const(v=ug, ax=ax_ug)
+    _add_is_const(v=ug, ax=ax_ug, x=0.5, color="white")
     ax_ug.set_xticks(t_ticks_ug)
     ax_ug.set_xticklabels([sds.time_formatter(tick) for tick in t_ticks_ug])
     ax_ug.set_xlabel(sds.time_label)
     ax_ug.set_ylabel("Height, m")
     ax_ug.set_ylim(0, sim.grid.H)
-    fig.colorbar(pc, ax=ax_ug)
+    fig.colorbar(pc, ax=ax_ug, label="$U_g$, m s$^{-1}$", pad=0.01)
 
     # Heat forcing
     if sim.forcing.w_th_s is None:
@@ -192,7 +190,7 @@ def plot_bc(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
         unit = UNITS["w_th"]
 
     ax_heat.plot(t, heat, color=COLORS["th"])
-    ax_heat.set_ylabel(f"{label}, {unit}")
+    ax_heat.set_ylabel(f"{label},\n{unit}")
     ax_heat.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
     ax_heat.margins(x=0)
     _add_is_const(v=heat, ax=ax_heat)
@@ -207,7 +205,7 @@ def plot_bc(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     ax_w_qv.set_xticks(t_ticks)
     ax_w_qv.set_xticklabels([sds.time_formatter(tick) for tick in t_ticks])
 
-    ax_w_qv.set_ylabel(f"{LABELS_PRETTY['w_qv']}, {UNITS['w_qv']}")
+    ax_w_qv.set_ylabel(f"{LABELS_PRETTY['w_qv']},\n{UNITS['w_qv']}")
 
 
 def plot_ic_bc(sds: SimDrawSpec) -> plt.Figure:
