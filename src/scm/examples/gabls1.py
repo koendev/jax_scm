@@ -56,9 +56,6 @@ def get_gabls1(Nz: int = 64, plot: bool = False) -> Simulation:
     # Initial temperature
     th = jnp.ones(Nz) * 265.0  # K
     th = jnp.where(grid.z > z_inv, th + 0.01 * (grid.z - z_inv), th)  # capping inversion
-    # th = jnp.where(
-    #     grid.z < 50, th + 0.1 * jax.random.normal(key=jax.random.key(random_seed), shape=(Nz,)), th
-    # )  # random 0.1K perturbation near surface
 
     # No moisture
     qv = jnp.zeros(grid.Nz)

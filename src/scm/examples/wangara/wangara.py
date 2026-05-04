@@ -11,8 +11,8 @@ from scm import convert, consts
 from scm.grid import StaggeredGrid
 from scm.interfaces import Simulation, Forcing
 from scm.mo import MOSettings
-from scm.mynn.interfaces import MYNNParams, ProgVarsMYNN
-
+from scm.mynn.interfaces import ProgVarsMYNN
+from scm.mynn.closure import MYNNParams
 
 TIMES = ["09:00", "10:00", "12:00", "14:00", "16:00"]
 _T_LONG = [f"1967-08-16T{t}" for t in TIMES]
@@ -42,16 +42,18 @@ def get_wangara_day33(Nz: int = 50) -> Simulation:
     v = np.interp(grid.z, df["z"], df["v"])
 
     # Estimate surface TKE from initial wind via neutral log-law, then decay exponentially.
-    u_st_est = np.sqrt(u[0] ** 2 + v[0] ** 2) * consts.kappa / np.log(grid.z[0] / mo_settings.z0m)
+    u_st_est = 0.175  # m/s from obs (Hicks et al 1981)
     qke_sfc_est = params.B1 ** (2 / 3) * u_st_est**2
-    qke_init = np.maximum(qke_sfc_est * np.exp(-grid.z / 100.0), consts.qke_min)
+    H_est = 100  # estimated BLH at 9:00
+    qke_init = jnp.zeros(grid.Nz)
+    qke_init = jnp.where(grid.z < H_est, qke_sfc_est * (1 - grid.z / H_est) ** 3, qke_init)  # adapted from GABLS1
 
     init = ProgVarsMYNN(
         u=jnp.array(u),
         v=jnp.array(v),
         th=jnp.array(th),
         qv=jnp.array(qv),
-        qke=jnp.array(qke_init),
+        qke=qke_init,
     )
 
     ## Forcing
