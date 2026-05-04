@@ -4,6 +4,7 @@ import pathlib
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 from jax import numpy as jnp
 
 from scm import convert, consts
@@ -11,6 +12,11 @@ from scm.grid import StaggeredGrid
 from scm.interfaces import Simulation, Forcing
 from scm.mo import MOSettings
 from scm.mynn.interfaces import MYNNParams, ProgVarsMYNN
+
+
+TIMES = ["09:00", "10:00", "12:00", "14:00", "16:00"]
+_T_LONG = [f"1967-08-16T{t}" for t in TIMES]
+_T_1400 = "1967-08-16T14:00"
 
 
 def get_wangara_day33(Nz: int = 50) -> Simulation:
@@ -83,3 +89,39 @@ def get_wangara_day33(Nz: int = 50) -> Simulation:
         t_index_fn=lambda t_s: pd.to_datetime("1967-08-16") + pd.to_timedelta(t_s, unit="s"),
     )
     return sim
+
+
+def postproc_wangara(ds: xr.Dataset) -> xr.Dataset:
+    """Get Wangara Day 33 diagnostics for validation plots."""
+    # Inversion height as height of minimum sensible heatflux
+    zi = ds["zh"].isel(zh=ds["w_thv"].argmin("zh"))  # tab 1 caption
+
+    # Heat flux at zi, normalized by surface flux
+    w_thv_s = ds["mo_w_thv"]
+    R = ds["w_thv"].sel(zh=zi) / w_thv_s  # m, tab 1 caption
+
+    # Convective velocity scale
+    w_st = (consts.g / ds.attrs["th_ref"] * w_thv_s * zi) ** (1 / 3)  # m/s, tab 1 caption
+
+    # Normalized TKE budget. Divide by 2 for QKE to TKE.
+    tke_scale = w_st**3 / zi
+    tke_P_S = ds["qke_P_S"] / tke_scale / 2
+    tke_P_B = ds["qke_P_B"] / tke_scale / 2
+    tke_eps = ds["qke_eps"] / tke_scale / 2
+
+    # Transport term: divergence of tke flux, normalized by tke_scale.
+    div_w_tke = ds["w_qke"].diff("zh") / ds["zh"].diff("zh")
+    div_w_tke = div_w_tke / tke_scale / 2
+
+    ds_pp = xr.Dataset(
+        {
+            "zi": zi,
+            "R": R,
+            "w_st": w_st,
+            "tke_P_S": tke_P_S,
+            "tke_P_B": tke_P_B,
+            "tke_eps": tke_eps,
+            "div_w_tke": div_w_tke,
+        }
+    )
+    return ds_pp

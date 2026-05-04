@@ -7,13 +7,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from scm import consts
 from scm.config import load_namelist, Namelist
-from scm.examples.wangara.wangara import get_wangara_day33
+from scm.examples.wangara import get_wangara_day33, postproc_wangara
 from scm.io.local import out_to_ds
 from scm.mynn.model import init_model
 from scm.reporter import BaseReport
 from scm.time_stepping import simulate
-from scm import consts
 
 plot_kwargs = {
     "color": "C1",
@@ -49,25 +49,10 @@ def make_report(ds: xr.Dataset, fname: str):
     t_short = ["09:00", "10:00", "12:00", "14:00", "16:00"]
     t_long = [f"1967-08-16T{t}" for t in t_short]
     t_1400 = "1967-08-16T14:00"
+
     ds = ds.sel(time=t_long)
-
-    # Single value validation
-    zi = ds["zh"].isel(zh=ds["w_thv"].argmin("zh"))  # tab 1 caption
-    w_thv_s = ds["mo_w_thv"]
-    R = ds["w_thv"].sel(zh=zi) / w_thv_s  # m, tab 1 caption
-    w_st = (consts.g / ds.attrs["th_ref"] * w_thv_s * zi) ** (1 / 3)  # m/s, tab 1 caption
-
-    # Prepare 1400 TKE budget
-    tke_scale = 2 * w_st**3 / zi  # qke_P_S/B/eps are in QKE (=2*TKE) units; divide by 2 for TKE normalization
-    tke_P_S = (ds["qke_P_S"] / tke_scale).sel(time=t_1400)
-    tke_P_B = (ds["qke_P_B"] / tke_scale).sel(time=t_1400)
-    tke_eps = (ds["qke_eps"] / tke_scale).sel(time=t_1400)
-
-    # Transport term: divergence of q² flux, normalized by tke_scale.
-    # w_qke is the q²=2*TKE flux; tke_scale already carries the factor of 2,
-    # so ∂w_qke/∂z / tke_scale = ∂w_TKE/∂z / (w_st³/zi) — no extra /2 needed.
-    div_w_tke = ds["w_qke"].diff("zh") / ds["zh"].diff("zh")
-    div_w_tke = (div_w_tke / tke_scale).sel(time=t_1400)
+    ds_pp = postproc_wangara(ds)
+    ds_tke_budget = ds_pp.sel(time=t_1400)
 
     ref_kw = {"linestyle": "--", "linewidth": 1.5, "alpha": 0.8}
 
@@ -136,10 +121,10 @@ def make_report(ds: xr.Dataset, fname: str):
         ax.plot(*ref["B"], color="C1", **ref_kw)
         ax.plot(*ref["T+P"], color="C2", **ref_kw)
         ax.plot(*ref["D"], color="C3", **ref_kw)
-        ax.plot(tke_P_S, ds["z"], color="C0", lw=1.5, label="Shear (S)")
-        ax.plot(tke_P_B, ds["z"], color="C1", lw=1.5, label="Buoyancy (B)")
-        ax.plot(div_w_tke.values, ds["z"].values, color="C2", lw=1.5, label="Transport (T)")
-        ax.plot(-tke_eps, ds["z"], color="C3", lw=1.5, label="Dissipation (-D)")
+        ax.plot(ds_tke_budget["tke_P_S"].values, ds["z"], color="C0", lw=1.5, label="Shear (S)")
+        ax.plot(ds_tke_budget["tke_P_B"].values, ds["z"], color="C1", lw=1.5, label="Buoyancy (B)")
+        ax.plot(ds_tke_budget["div_w_tke"], ds["z"].values, color="C2", lw=1.5, label="Transport (T)")
+        ax.plot(-ds_tke_budget["tke_eps"], ds["z"], color="C3", lw=1.5, label="Dissipation (-D)")
         ax.set_xlim(-1, 1)
         _add_ref_legend(ax)
         r.add_mpl_fig(fig, caption="TKE budget at 14:00")
@@ -189,11 +174,11 @@ def make_report(ds: xr.Dataset, fname: str):
 
         fig, (ax1, ax2, ax3) = plt.subplots(ncols=3, figsize=(6, 2), constrained_layout=True)
         c = np.linspace(0, 1, len(df))
-        ax1.scatter(df["neg_R"], -R[1:], c=c)
+        ax1.scatter(df["neg_R"], -ds_pp["R"][1:], c=c)
         _annotate_scatter(ax1, "-R, -")
-        ax2.scatter(df["zi"], zi[1:], c=c)
+        ax2.scatter(df["zi"], ds_pp["zi"][1:], c=c)
         _annotate_scatter(ax2, "zi, m")
-        ax3.scatter(df["w_st"], w_st[1:], c=c)
+        ax3.scatter(df["w_st"], ds_pp["w_st"][1:], c=c)
         _annotate_scatter(ax3, "w_st, m/s")
         r.add_mpl_fig(fig, caption="Mixed layer parameters")
 

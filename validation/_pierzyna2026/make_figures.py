@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Callable
 import pathlib
 
@@ -13,6 +15,7 @@ import xarray as xr
 
 from scm import consts
 from scm.examples import get_andren1994, get_wangara_day33, get_gabls1
+from scm.examples.wangara import postproc_wangara
 from scm.interfaces import Simulation
 
 sns.set_palette("colorblind")
@@ -60,10 +63,10 @@ UNITS = {
 }
 
 FIG_ROOT = pathlib.Path("figures")
-VAL_ROOT = pathlib.Path("..")
+VAL_ROOT = pathlib.Path(__file__).parent.parent
 
 
-def _read_ref_csv(path: pathlib.Path, sort: str = "x") -> dict:
+def _read_ref_csv(path: pathlib.Path, sort: str) -> dict:
     """Read digitized reference CSV (label row, X/Y row, data...). Returns dict label -> (x, y)."""
     raw = pd.read_csv(path, header=None)
     labels = raw.iloc[0].dropna().tolist()
@@ -78,7 +81,9 @@ def _read_ref_csv(path: pathlib.Path, sort: str = "x") -> dict:
 
 
 @dataclasses.dataclass
-class SimDrawSpec:
+class SimPlotSpec:
+    """Plotting specifications for a given simulation"""
+
     sim: Simulation
     short_name: str
     time_formatter: Callable[[float], str]
@@ -93,7 +98,7 @@ sim_a94 = get_andren1994()
 sim_gab1 = get_gabls1()
 sim_wg33 = get_wangara_day33()
 sims = [
-    SimDrawSpec(
+    SimPlotSpec(
         sim=sim_a94,
         short_name="A94",
         time_formatter=lambda t: f"{t * sim_a94.forcing.f_c:.0f}",
@@ -102,14 +107,14 @@ sims = [
         ref_dir=VAL_ROOT / "andren1994" / "ref",
         out_file=VAL_ROOT / "andren1994" / "out_cn.nc",
     ),
-    SimDrawSpec(
+    SimPlotSpec(
         sim=sim_gab1,
         short_name="GAB1",
         time_formatter=lambda t: f"{t/3600:.0f}",
         time_label="Time, h",
         time_n_ticks=10,
     ),
-    SimDrawSpec(
+    SimPlotSpec(
         sim=sim_wg33,
         short_name="WG33",
         time_formatter=lambda t: f"{t/3600:02.0f}",
@@ -140,7 +145,7 @@ def _add_is_const(v: jnp.ndarray, ax: plt.Axes, x: float = 0.95, y: float = 0.95
     ax.text(x, y, label, transform=ax.transAxes, ha=ha, va="top", fontsize=6, color=color)
 
 
-def plot_ic(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
+def plot_ic(sps: SimPlotSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     """Plot initial conditions."""
     ic_gs = gs.subgridspec(nrows=1, ncols=4)
     ax_uv = fig.add_subplot(ic_gs[0, 0])
@@ -148,7 +153,7 @@ def plot_ic(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     ax_qv = fig.add_subplot(ic_gs[0, 2], sharey=ax_uv)
     ax_qke = fig.add_subplot(ic_gs[0, 3], sharey=ax_uv)
 
-    sim = sds.sim
+    sim = sps.sim
     ax_uv.plot(sim.init.u, sim.grid.z, label="u", color=COLORS["u"])
     ax_uv.plot(sim.init.v, sim.grid.z, label="v", color=COLORS["v"])
     _add_is_const(v=sim.init.u, ax=ax_uv, x=0.5)
@@ -175,7 +180,7 @@ def plot_ic(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
         ax.tick_params(axis="y", which="both", left=False, labelleft=False)
 
 
-def plot_bc(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
+def plot_bc(sps: SimPlotSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     """Plot boundary conditions (i.e. time-varying forcing)."""
     row_gs = gs.subgridspec(
         nrows=2,
@@ -187,9 +192,9 @@ def plot_bc(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     ax_heat = fig.add_subplot(row_gs[0, 1])
     ax_w_qv = fig.add_subplot(row_gs[1, 1], sharex=ax_heat)
 
-    sim = sds.sim
+    sim = sps.sim
     t = jnp.linspace(sim.t_start_s, sim.t_end_s)
-    t_ticks = jnp.linspace(sim.t_start_s, sim.t_end_s, sds.time_n_ticks)
+    t_ticks = jnp.linspace(sim.t_start_s, sim.t_end_s, sps.time_n_ticks)
     t_ticks_ug = jnp.linspace(sim.t_start_s, sim.t_end_s, 3)
 
     # Geostrophic forcing
@@ -197,8 +202,8 @@ def plot_bc(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     pc = ax_ug.pcolormesh(t, sim.grid.z, ug.T, shading="auto", cmap="Blues", rasterized=True)
     _add_is_const(v=ug, ax=ax_ug, x=0.5, color="white")
     ax_ug.set_xticks(t_ticks_ug)
-    ax_ug.set_xticklabels([sds.time_formatter(tick) for tick in t_ticks_ug])
-    ax_ug.set_xlabel(sds.time_label)
+    ax_ug.set_xticklabels([sps.time_formatter(tick) for tick in t_ticks_ug])
+    ax_ug.set_xlabel(sps.time_label)
     ax_ug.set_ylabel("Height, m")
     ax_ug.set_ylim(0, sim.grid.H)
     fig.colorbar(pc, ax=ax_ug, label="$U_g$, m s$^{-1}$", pad=0.01)
@@ -227,77 +232,56 @@ def plot_bc(sds: SimDrawSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     _add_is_const(v=w_qv, ax=ax_w_qv)
 
     ax_w_qv.margins(x=0)
-    ax_w_qv.set_xlabel(sds.time_label)
+    ax_w_qv.set_xlabel(sps.time_label)
     ax_w_qv.set_xticks(t_ticks)
-    ax_w_qv.set_xticklabels([sds.time_formatter(tick) for tick in t_ticks])
+    ax_w_qv.set_xticklabels([sps.time_formatter(tick) for tick in t_ticks])
 
     ax_w_qv.set_ylabel(f"{LABELS_PRETTY['w_qv']},\n{UNITS['w_qv']}")
 
 
-def plot_ic_bc(sds: SimDrawSpec) -> plt.Figure:
+def plot_ic_bc(sps: SimPlotSpec) -> plt.Figure:
     """Plot initial conditions and boundary conditions for a given simulation."""
     fig = plt.figure(constrained_layout=True, figsize=(4, 3))
     outer_gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=(1, 1))
 
-    plot_ic(sds, fig, outer_gs[0])
-    plot_bc(sds, fig, outer_gs[1])
+    plot_ic(sps, fig, outer_gs[0])
+    plot_bc(sps, fig, outer_gs[1])
 
     return fig
 
 
-def plot_a94_res(sds: SimDrawSpec) -> plt.Figure:
+def plot_a94_res(sps: SimPlotSpec) -> plt.Figure:
     """Plot Andren 1994 results (Figs 2, 3a/b, 4a, 6a/b) against digitized reference data."""
 
     def _plot_ref(ax: plt.Axes, path: pathlib.Path, sort: str = "x") -> None:
-        """Overplot all digitized reference curves on ax (used for A94 multi-model refs)."""
+        """Overplot all digitized reference curves on ax (A94 multi-model style)."""
         for label, (x, y) in _read_ref_csv(path, sort=sort).items():
             ax.plot(x, y, label=label, color="k", lw=0.75)
 
-    from scm.mo import MOSettings
-
-    ds = xr.open_dataset(sds.out_file)
-    ref_dir = sds.ref_dir
-
-    f = ds["frc_f_c"].item()
-    tf = ds["time"] * f
-    mo_settings = MOSettings.deserialize(ds.attrs["mo_settings"])
-
-    ds_sub = ds.sel(time=slice(7 / f, None)).mean("time")
-    u_st = float(ds_sub["mo_u_st"])
-    zh_norm = ds_sub["zh"] * f / u_st
-
-    # phi_m profile: insert surface BC at z0h for proper log-law gradient near surface
-    u = np.insert(ds_sub["u"].values, 0, 0)
-    v = np.insert(ds_sub["v"].values, 0, 0)
-    z = np.insert(ds_sub["z"].values, 0, mo_settings.z0h)
-    zh_log = np.diff(z) / np.log(z[1:] / z[:-1])
-    dz = np.diff(z)
-    phi_m = consts.kappa * zh_log / u_st * np.sqrt(((u[1:] - u[:-1]) / dz) ** 2 + ((v[1:] - v[:-1]) / dz) ** 2)
-
-    fig, axes = plt.subplots(2, 3, figsize=(7, 5), constrained_layout=True)
+    vd = get_andren1994_val_data(xr.open_dataset(sps.out_file))
+    ref_dir = sps.ref_dir
     jax_kw = dict(color="C1", lw=1, label="jax-scm")
 
+    fig, axes = plt.subplots(2, 3, figsize=(7, 5), constrained_layout=True)
+
     # --- Row 0: time series ---
-    tke_norm = f / ds["mo_u_st"] ** 3 * np.trapezoid(y=ds["qke"] / 2, x=ds["z"])
     _plot_ref(axes[0, 0], ref_dir / "a94_fig2.csv")
-    axes[0, 0].plot(tf, tke_norm, **jax_kw)
+    axes[0, 0].plot(vd["tf"], vd["tke_norm"], **jax_kw)
     axes[0, 0].set_xlabel("$tf$")
     axes[0, 0].set_xlim(0, 10)
     axes[0, 0].set_ylim(0, 1.25)
     axes[0, 0].set_yticks(np.arange(0, 1.6, 0.25))
     axes[0, 0].set_ylabel(r"$f \int q^2/2 \, dz \; / \; u_*^3$")
 
-    C_u = -f / ds["mo_u_w"] * np.trapezoid(y=ds["v"] - ds["frc_v_geo"], x=ds["z"])
     _plot_ref(axes[0, 1], ref_dir / "a94_fig3a.csv")
-    axes[0, 1].plot(tf, C_u, **jax_kw)
+    axes[0, 1].plot(vd["tf"], vd["C_u"], **jax_kw)
     axes[0, 1].set_xlabel("$tf$")
     axes[0, 1].set_xlim(0, 10)
     axes[0, 1].set_ylim(0, 1.75)
     axes[0, 1].set_ylabel(r"$C_u$")
 
-    C_v = f / ds["mo_v_w"] * np.trapezoid(y=ds["u"] - ds["frc_u_geo"], x=ds["z"])
     _plot_ref(axes[0, 2], ref_dir / "a94_fig3b.csv")
-    axes[0, 2].plot(tf, C_v, **jax_kw)
+    axes[0, 2].plot(vd["tf"], vd["C_v"], **jax_kw)
     axes[0, 2].set_xlabel("$tf$")
     axes[0, 2].set_xlim(0, 10)
     axes[0, 2].set_ylim(0, 3)
@@ -305,7 +289,7 @@ def plot_a94_res(sds: SimDrawSpec) -> plt.Figure:
 
     # --- Row 1: vertical profiles (time-averaged over last 3/f) ---
     _plot_ref(axes[1, 0], ref_dir / "a94_fig4a.csv", sort="y")
-    axes[1, 0].plot(phi_m, zh_log * f / u_st, **jax_kw)
+    axes[1, 0].plot(vd["phi_m"], vd["zh_log_norm"], **jax_kw)
     axes[1, 0].axvline(1, color="k", ls="--", lw=0.75)
     axes[1, 0].set_xlabel(r"$\Phi_M$")
     axes[1, 0].set_xlim(0, 2)
@@ -313,14 +297,14 @@ def plot_a94_res(sds: SimDrawSpec) -> plt.Figure:
     axes[1, 0].set_ylim(0, 0.1)
 
     _plot_ref(axes[1, 1], ref_dir / "a94_fig6a.csv", sort="y")
-    axes[1, 1].plot(ds_sub["u_w"] / u_st**2, zh_norm, **jax_kw)
+    axes[1, 1].plot(vd["uw_norm"], vd["zh_norm"], **jax_kw)
     axes[1, 1].axvline(0, color="k", ls="--", lw=0.75)
     axes[1, 1].set_xlabel(r"$\overline{uw}/u_*^2$")
     axes[1, 1].set_ylabel(r"$zf/u_*$")
     axes[1, 1].set_ylim(0, 0.35)
 
     _plot_ref(axes[1, 2], ref_dir / "a94_fig6b.csv", sort="y")
-    axes[1, 2].plot(ds_sub["v_w"] / u_st**2, zh_norm, **jax_kw)
+    axes[1, 2].plot(vd["vw_norm"], vd["zh_norm"], **jax_kw)
     axes[1, 2].axvline(0, color="k", ls="--", lw=0.75)
     axes[1, 2].set_xlabel(r"$\overline{vw}/u_*^2$")
     axes[1, 2].set_ylabel(r"$zf/u_*$")
@@ -332,119 +316,42 @@ def plot_a94_res(sds: SimDrawSpec) -> plt.Figure:
     return fig
 
 
-def plot_wg33_res(sds: SimDrawSpec) -> plt.Figure:
-    """Plot Wangara Day 33 results (th, w_thv, qke, qv, w_qv, TKE budget) against NN09 reference."""
-    # Time labels used in Wangara plots; index determines line color (C0–C4)
-    WG33_TIMES = ["09:00", "10:00", "12:00", "14:00", "16:00"]
-
-    def _plot_profiles(
-        ax: plt.Axes,
-        ref_path: pathlib.Path,
-        da: xr.DataArray,
-        z: xr.DataArray,
-        times: list[str],
-        scale: float = 1.0,
-    ) -> None:
-        """Plot vertical profiles at multiple times with NN09 reference overlay.
-
-        Colors are assigned based on position in WG33_TIMES so they stay consistent
-        across panels even when a subset of times is shown (e.g. skip 09:00).
-
-        da must have a leading time dimension with len(times) entries.
-        """
-        ref = _read_ref_csv(ref_path, sort="y")
-        ref_kw = dict(ls="--", lw=0.75, alpha=0.8)
-        ci_start = WG33_TIMES.index(times[0])
-        for i, t in enumerate(times):
-            color = f"C{ci_start + i}"
-            if t in ref:
-                ax.plot(*ref[t], color=color, **ref_kw)
-            ax.plot(da.isel(time=i).values * scale, z.values, color=color, label=t, lw=1)
-
-    ds = xr.open_dataset(sds.out_file)
-    ref_dir = sds.ref_dir
-
-    t_long = [f"1967-08-16T{t}" for t in WG33_TIMES]
+def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
+    """Plot Wangara Day 33 results against NN09 reference."""
+    t_short = ["09:00", "10:00", "12:00", "14:00", "16:00"]  # Hours to plot
+    t_long = [f"1967-08-16T{t}" for t in t_short]  # convert to full timestamps for indexing
     t_1400 = "1967-08-16T14:00"
-    t4 = WG33_TIMES[1:]  # times that skip 09:00 (heat/moisture flux, TKE)
 
-    ds_sel = ds.sel(time=t_long)
-    ds4 = ds_sel.isel(time=slice(1, None))
+    # Load and select data
+    ds = xr.open_dataset(sps.out_file).sel(time=t_long)
+    ds_pp = postproc_wangara(ds)
+    ds_tke_budget = ds_pp.sel(time=t_1400)
 
-    # TKE budget scalings at 14:00
-    ds_1400 = ds_sel.sel(time=t_1400)
-    zi = float(ds_sel["zh"].isel(zh=int(ds_1400["w_thv"].argmin("zh"))))
-    w_thv_s = float(ds_1400["mo_w_thv"])
-    w_st = (consts.g / float(ds.attrs["th_ref"]) * w_thv_s * zi) ** (1 / 3)
-    tke_scale = 2 * w_st**3 / zi
-    div_w_tke = (ds_sel["w_qke"].diff("zh") / ds_sel["zh"].diff("zh")).sel(time=t_1400) / tke_scale
-
-    fig, axes = plt.subplots(2, 3, figsize=(7, 5), constrained_layout=True)
     ref_kw = dict(ls="--", lw=0.75, alpha=0.8)
 
-    # [0, 0]: potential temperature
-    _plot_profiles(axes[0, 0], ref_dir / "nn09_fig3.csv", ds_sel["th"] - 273.15, ds_sel["z"], WG33_TIMES)
-    axes[0, 0].set_xlabel(r"$\Theta$, $^\circ$C")
-    axes[0, 0].set_ylabel("Height, m")
+    fig, axarr = plt.subplots(nrows=2, ncols=6, figsize=(12, 5), constrained_layout=True)
 
-    # [0, 1]: buoyancy heat flux
-    _plot_profiles(axes[0, 1], ref_dir / "nn09_fig4.csv", ds4["w_thv"] * 100, ds4["zh"], t4)
-    axes[0, 1].set_xlabel(r"$\langle w\theta_v \rangle$, $10^{-2}$ K m s$^{-1}$")
-    axes[0, 1].set_ylabel("Height, m")
-
-    # [0, 2]: TKE
-    _plot_profiles(axes[0, 2], ref_dir / "nn09_fig5.csv", ds4["qke"] / 2, ds4["z"], t4)
-    axes[0, 2].set_xlabel(r"TKE, m$^2$ s$^{-2}$")
-    axes[0, 2].set_ylabel("Height, m")
-
-    # [1, 0]: water vapor
-    _plot_profiles(axes[1, 0], ref_dir / "nn09_fig8.csv", ds_sel["qv"] * 1000, ds_sel["z"], WG33_TIMES)
-    axes[1, 0].set_xlabel(r"$Q_v$, g kg$^{-1}$")
-    axes[1, 0].set_ylabel("Height, m")
-
-    # [1, 1]: moisture flux
-    _plot_profiles(axes[1, 1], ref_dir / "nn09_fig9.csv", ds4["w_qv"] * 1e5, ds4["zh"], t4)
-    axes[1, 1].set_xlabel(r"$\langle wq_v \rangle$, $10^{-5}$ m s$^{-1}$")
-    axes[1, 1].set_ylabel("Height, m")
-
-    # [1, 2]: TKE budget at 14:00
-    bud_ref = _read_ref_csv(ref_dir / "nn09_fig6.csv", sort="y")
-    axes[1, 2].plot(*bud_ref["S"], color="C0", **ref_kw)
-    axes[1, 2].plot(*bud_ref["B"], color="C1", **ref_kw)
-    axes[1, 2].plot(*bud_ref["T+P"], color="C2", **ref_kw)
-    axes[1, 2].plot(*bud_ref["D"], color="C3", **ref_kw)
-    axes[1, 2].plot(ds_1400["qke_P_S"].values / tke_scale, ds["z"].values, color="C0", lw=1, label="Shear")
-    axes[1, 2].plot(ds_1400["qke_P_B"].values / tke_scale, ds["z"].values, color="C1", lw=1, label="Buoy.")
-    axes[1, 2].plot(div_w_tke.values, ds["z"].values, color="C2", lw=1, label="Transp.")
-    axes[1, 2].plot(-ds_1400["qke_eps"].values / tke_scale, ds["z"].values, color="C3", lw=1, label=r"$-\varepsilon$")
-    axes[1, 2].set_xlim(-1, 1)
-    axes[1, 2].set_xlabel(r"TKE budget, $w_*^3/z_i$")
-    axes[1, 2].set_ylabel("Height, m")
-    axes[1, 2].legend(fontsize=6, loc="upper right")
-
-    # shared legend: time labels + NN09 reference proxy
-    handles, labels = axes[0, 0].get_legend_handles_labels()
-    proxy_ref = mlines.Line2D([], [], color="k", lw=0.75, ls="--", alpha=0.8, label="NN09 (ref)")
-    fig.legend(
-        handles + [proxy_ref],
-        labels + ["NN09 (ref)"],
-        loc="outside lower center",
-        ncol=len(handles) + 1,
-        fontsize=7,
-    )
+    # Potential temperature
+    ref = _read_ref_csv(sps.ref_dir / "nn09_fig3.csv", sort="y")
+    ax = axarr[0, 0]
+    for i, t in enumerate(t_short):
+        ax.plot(*ref[t], color=f"C{i}", **ref_kw)
+        ax.plot(ds["th"].isel(time=i) - 273.15, ds["z"], color=f"C{i}", label=t, lw=1.5)
+    ax.set_xlabel("Pot. temp, C")
+    ax.set_ylabel("Height, m")
 
     return fig
 
 
 if __name__ == "__main__":
-    for sim in sims:
-        fig_ic_bc = plot_ic_bc(sim)
-        fig_ic_bc.savefig(FIG_ROOT / f"ic_bc_{sim.short_name}.pdf")
+    # for sim in sims:
+    #     fig_ic_bc = plot_ic_bc(sim)
+    #     fig_ic_bc.savefig(FIG_ROOT / f"ic_bc_{sim.short_name}.pdf")
+    #
+    sps_a94, _, sps_wg33 = sims
+    #
+    # fig_a94 = plot_a94_res(sps_a94)
+    # fig_a94.savefig(FIG_ROOT / "res_A94.pdf")
 
-    sds_a94, _, sds_wg33 = sims
-
-    fig_a94 = plot_a94_res(sds_a94)
-    fig_a94.savefig(FIG_ROOT / "res_A94.pdf")
-
-    fig_wg33 = plot_wg33_res(sds_wg33)
+    fig_wg33 = plot_wg33_res(sps_wg33)
     fig_wg33.savefig(FIG_ROOT / "res_WG33.pdf")
