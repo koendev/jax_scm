@@ -3,11 +3,8 @@ from __future__ import annotations
 import dataclasses
 import pathlib
 
-import numpy as np
-
 from scm.config import load_namelist
 from scm.forcing.era5 import get_era5_sim
-from scm.forcing.interp import interp_dtindex
 from scm.grid import StaggeredGrid
 from scm.io.local import out_to_ds
 from scm.mynn.model import init_model
@@ -37,11 +34,7 @@ def run(use_lf: bool):
     # Save output
     out_file = "out_lf.nc" if use_lf else "out_no_lf.nc"
     out_file = pathlib.Path(out_file)
-    ds = out_to_ds(
-        out=out,
-        sim=sim,
-        time=interp_dtindex(t_s=np.array(out.t_s), idx=sim.t_index).round("1min"),
-    )
+    ds = out_to_ds(out=out, sim=sim)
     ds.to_netcdf(out_file)
     print("Written to disk.")
     return ds
