@@ -8,7 +8,7 @@ from scm.config import Namelist, AdaptiveTimestepConfig
 from scm.examples.gabls1 import get_gabls1
 from scm.interfaces import Output
 from scm.io.local import out_to_ds
-from scm.mynn.interfaces import MYNNParams
+from scm.mynn.closure import MYNNParams
 from scm.mynn.model import init_model
 from scm.time_stepping import simulate
 

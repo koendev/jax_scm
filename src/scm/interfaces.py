@@ -17,7 +17,7 @@ import pandas as pd
 from scm.grid import StaggeredGrid
 from scm.mo import MOResult, MOSettings
 from scm.metadata import meta_field
-from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN, GradVarsMYNN, MYNNParams  # noqa: F401
+from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN, GradVarsMYNN
 
 ParamsT = TypeVar("ParamsT")
 

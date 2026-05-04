@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
+
+import jax
 import jax.numpy as jnp
 
 from scm import consts
@@ -8,7 +11,7 @@ from scm.grad import d_dz
 from scm.grid import StaggeredGrid
 from scm.interfaces import ClosureFn
 from scm.mo import MOResult
-from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN, GradVarsMYNN, MYNNParams
+from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN, GradVarsMYNN
 
 
 def get_qke_sfc(u_st: jnp.ndarray, B1: float) -> jnp.ndarray:
@@ -57,7 +60,9 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         # In MYNN, qke (q^2) is 2*TKE not specific humidity!
         qke_sfc = get_qke_sfc(u_st=mo_res.u_st, B1=B1)
         qke_top_h = 1.5 * state.qke[-1] - 0.5 * state.qke[-2]  # linear extrapolation to top half-level
-        qke_h = jnp.concatenate([jnp.atleast_1d(qke_sfc), (state.qke[:-1] + state.qke[1:]) / 2, jnp.atleast_1d(qke_top_h)])
+        qke_h = jnp.concatenate(
+            [jnp.atleast_1d(qke_sfc), (state.qke[:-1] + state.qke[1:]) / 2, jnp.atleast_1d(qke_top_h)]
+        )
         q = jnp.sqrt(jnp.clip(qke_h, min=consts.qke_min))  # turbulent velocity scale
 
         # Virtual potential temperature gradient needed for buoyancy terms
@@ -85,7 +90,9 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         # Buoyance length scale (eq 55, NN09)
         th_0 = th_ref
         N = jnp.sqrt(jnp.clip(consts.g / th_0 * dthv_dz, a_min=consts.smooth_eps))  # in line after eq 55, NN09
-        q_c = jnp.clip((consts.g / th_0) * mo_res.w_thv * L_T, a_min=consts.smooth_eps) ** (1 / 3)  # in line after eq 55, NN09
+        q_c = jnp.clip((consts.g / th_0) * mo_res.w_thv * L_T, a_min=consts.smooth_eps) ** (
+            1 / 3
+        )  # in line after eq 55, NN09
         # N_safe: used in false-branch of jnp.where to prevent NaN gradients when dthv_dz<=0.
         # The true-branch returns inf so N never actually divides there, but AD still
         # differentiates the false-branch expression; N_safe keeps ∂/∂N finite.
@@ -129,7 +136,9 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         Ri1 = 0.5 * A2 * F2 / (A1 * F1)
         Ri2 = 0.5 * Rf1 / Ri1
         Ri3 = (2 * Rf2 - Rf1) / Ri1
-        Rf = Ri1 * (Ri + Ri2 - (jnp.clip(Ri**2 - Ri3 * Ri + Ri2**2, a_min=consts.smooth_eps)) ** (1 / 2))  # eq A11, NN09
+        Rf = Ri1 * (
+            Ri + Ri2 - (jnp.clip(Ri**2 - Ri3 * Ri + Ri2**2, a_min=consts.smooth_eps)) ** (1 / 2)
+        )  # eq A11, NN09
 
         # Level-2 stability functions
         SH2 = 3 * A2 * (gamma1 + gamma2) * (Rfc - Rf) / (1 - Rf)  # eq A4, NN09
@@ -242,3 +251,25 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         )
 
     return _closure
+
+
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass(frozen=True)
+class MYNNParams:
+    """MYNN level-2.5 closure constants (Nakanishi & Niino 2009, eq 66).
+
+    All fields are JAX pytree leaves. For gradient-based optimization, construct
+    with ``jnp.array`` values or convert via ``jax.tree_util.tree_map(jnp.asarray, MYNNParams())``.
+    """
+
+    A1: float = 1.18
+    A2: float = 0.665
+    B1: float = 24.0
+    B2: float = 15.0
+    C1: float = 0.137
+    C2: float = 0.75
+    C3: float = 0.352
+    C4: float = 0.0
+    C5: float = 0.2
+    gamma1: float = 0.235  # below eq A4, NN09
+    g_m_min: float = 1e-12  # numerical stabilizer for G_M denominator

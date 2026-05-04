@@ -7,7 +7,8 @@ import pytest
 from scm import mo
 from scm.grid import StaggeredGrid
 from scm.mynn import closure
-from scm.mynn.interfaces import ProgVarsMYNN, GradVarsMYNN, MYNNParams
+from scm.mynn.interfaces import ProgVarsMYNN, GradVarsMYNN
+from scm.mynn.closure import MYNNParams
 from shared import FIXTURE_ROOT
 
 

@@ -10,8 +10,8 @@ from scm.grad import d_dz
 from scm.grid import StaggeredGrid
 from scm.interfaces import ParamsT, Simulation, ModelFn, Forcing
 from scm.mo import init_mo_sfc, MOResult
-from scm.mynn.closure import init_closure, get_qke_sfc
-from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN, GradVarsMYNN, MYNNParams
+from scm.mynn.closure import init_closure, get_qke_sfc, MYNNParams
+from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN, GradVarsMYNN
 from scm import consts
 
 
