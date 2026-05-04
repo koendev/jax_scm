@@ -125,7 +125,7 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
             jnp.where(
                 zeta >= 0,
                 q / N_safe,
-                (1 + 5 * (q_c / L_T * N_safe) ** (1 / 2)) * q / N_safe,
+                (1 + 5 * (q_c / (L_T * N_safe)) ** (1 / 2)) * q / N_safe,
             ),
         )
 
