@@ -14,6 +14,28 @@ from scm.mo import MOResult
 from scm.mynn.interfaces import ProgVarsMYNN, DiagVarsMYNN, GradVarsMYNN
 
 
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass(frozen=True)
+class MYNNParams:
+    """MYNN level-2.5 closure constants (Nakanishi & Niino 2009, eq 66).
+
+    All fields are JAX pytree leaves. For gradient-based optimization, construct
+    with ``jnp.array`` values or convert via ``jax.tree_util.tree_map(jnp.asarray, MYNNParams())``.
+    """
+
+    A1: float = 1.18
+    A2: float = 0.665
+    B1: float = 24.0
+    B2: float = 15.0
+    C1: float = 0.137
+    C2: float = 0.75
+    C3: float = 0.352
+    C4: float = 0.0
+    C5: float = 0.2
+    gamma1: float = 0.235  # below eq A4, NN09
+    g_m_min: float = 1e-12  # numerical stabilizer for G_M denominator
+
+
 def get_qke_sfc(u_st: jnp.ndarray, B1: float) -> jnp.ndarray:
     """Surface boundary condition for QKE (q^2 = 2*TKE)."""
     return B1 ** (2 / 3) * u_st**2  # MY82, eq. 54
@@ -251,25 +273,3 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         )
 
     return _closure
-
-
-@jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True)
-class MYNNParams:
-    """MYNN level-2.5 closure constants (Nakanishi & Niino 2009, eq 66).
-
-    All fields are JAX pytree leaves. For gradient-based optimization, construct
-    with ``jnp.array`` values or convert via ``jax.tree_util.tree_map(jnp.asarray, MYNNParams())``.
-    """
-
-    A1: float = 1.18
-    A2: float = 0.665
-    B1: float = 24.0
-    B2: float = 15.0
-    C1: float = 0.137
-    C2: float = 0.75
-    C3: float = 0.352
-    C4: float = 0.0
-    C5: float = 0.2
-    gamma1: float = 0.235  # below eq A4, NN09
-    g_m_min: float = 1e-12  # numerical stabilizer for G_M denominator

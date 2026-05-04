@@ -66,10 +66,10 @@ class MOResult:
     u_w: jnp.ndarray = meta_field("Surface u-w stress", units="(m/s)^2", level="surface")
     v_w: jnp.ndarray = meta_field("Surface v-w stress", units="(m/s)^2", level="surface")
     # Gradients at first full level from MOST
-    dudz: jnp.ndarray = meta_field("du/dz at z (=dz/2) from MOST", units="s^-1", level="surface")
-    dvdz: jnp.ndarray = meta_field("dv/dz at z (=dz/2) from MOST", units="s^-1", level="surface")
-    dthdz: jnp.ndarray = meta_field("dth/dz at z (=dz/2) from MOST", units="K/m", level="surface")
-    dqvdz: jnp.ndarray = meta_field("dqv/dz at z (=dz/2) from MOST", units="(kg/kg)/m", level="surface")
+    dudz: jnp.ndarray = meta_field("du/dz at z=dz/2 from MOST", units="s^-1", level="surface")
+    dvdz: jnp.ndarray = meta_field("dv/dz at z=dz/2 from MOST", units="s^-1", level="surface")
+    dthdz: jnp.ndarray = meta_field("dth/dz at z=dz/2 from MOST", units="K/m", level="surface")
+    dqvdz: jnp.ndarray = meta_field("dqv/dz at z=dz/2 from MOST", units="(kg/kg)/m", level="surface")
 
 
 class MOFunc(Protocol):

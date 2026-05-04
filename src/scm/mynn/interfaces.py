@@ -12,12 +12,12 @@ from scm.metadata import meta_field
 class ProgVarsMYNN:
     """Prognostic variables"""
 
-    u: jnp.ndarray = meta_field(long_name="u velocity", units="m/s", level="full")
-    v: jnp.ndarray = meta_field(long_name="v velocity", units="m/s", level="full")
+    u: jnp.ndarray = meta_field(long_name="U velocity", units="m/s", level="full")
+    v: jnp.ndarray = meta_field(long_name="V velocity", units="m/s", level="full")
     th: jnp.ndarray = meta_field(
-        long_name="potential temperature", units="K", level="full"
+        long_name="Potential temperature", units="K", level="full"
     )  # no condensation, so th_l = th compared to NN09
-    qv: jnp.ndarray = meta_field(long_name="specific humidity", units="kg/kg", level="full")  # vapor only
+    qv: jnp.ndarray = meta_field(long_name="Specific humidity", units="kg/kg", level="full")  # vapor only
     qke: jnp.ndarray = meta_field(long_name="TWICE turbulent kinetic energy", units="m^2/s^2", level="full")
 
 
@@ -25,22 +25,22 @@ class ProgVarsMYNN:
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class DiagVarsMYNN:
     # Parameterized fluxes and variances
-    u_w: jnp.ndarray = meta_field(long_name="momentum flux (<uw>)", units="m^2/s^2", level="half")
-    v_w: jnp.ndarray = meta_field(long_name="momentum flux (<vw>)", units="m^2/s^2", level="half")
-    w_th: jnp.ndarray = meta_field(long_name="sensible heat flux", units="K m/s", level="half")
-    w_thv: jnp.ndarray = meta_field(long_name="buoyancy flux ", units="K m/s", level="half")
-    w_qv: jnp.ndarray = meta_field(long_name="moisture flux", units="kg/kg m/s", level="half")
-    th_th: jnp.ndarray = meta_field(long_name="potential temperature variance", units="K^2", level="full")
+    u_w: jnp.ndarray = meta_field(long_name="Momentum flux (<uw>)", units="m^2/s^2", level="half")
+    v_w: jnp.ndarray = meta_field(long_name="Momentum flux (<vw>)", units="m^2/s^2", level="half")
+    w_th: jnp.ndarray = meta_field(long_name="Sensible heat flux", units="K m/s", level="half")
+    w_thv: jnp.ndarray = meta_field(long_name="Buoyancy flux ", units="K m/s", level="half")
+    w_qv: jnp.ndarray = meta_field(long_name="Moisture flux", units="kg/kg m/s", level="half")
+    th_th: jnp.ndarray = meta_field(long_name="Potential temperature variance", units="K^2", level="full")
 
     # Length scales
-    L: jnp.ndarray = meta_field(long_name="turbulent length scale", units="m", level="half")
-    L_S: jnp.ndarray = meta_field(long_name="surface length scale", units="m", level="half")
-    L_T: jnp.ndarray = meta_field(long_name="turbulent length scale", units="m", level="half")
-    L_B: jnp.ndarray = meta_field(long_name="buoyancy length scale", units="m", level="half")
+    L: jnp.ndarray = meta_field(long_name="Turbulent length scale", units="m", level="half")
+    L_S: jnp.ndarray = meta_field(long_name="Surface length scale", units="m", level="half")
+    L_T: jnp.ndarray = meta_field(long_name="Turbulent length scale", units="m", level="half")
+    L_B: jnp.ndarray = meta_field(long_name="Buoyancy length scale", units="m", level="half")
 
     # Eddy diffusivities
-    Km: jnp.ndarray = meta_field(long_name="momentum diffusivity", units="m^2/s", level="half")
-    Kh: jnp.ndarray = meta_field(long_name="heat diffusivity", units="m^2/s", level="half")
+    Km: jnp.ndarray = meta_field(long_name="Momentum diffusivity", units="m^2/s", level="half")
+    Kh: jnp.ndarray = meta_field(long_name="Heat diffusivity", units="m^2/s", level="half")
     Kq: jnp.ndarray = meta_field(long_name="QKE diffusivity", units="m^2/s", level="half")  # (= L * q * Sq)
 
     # TKE terms

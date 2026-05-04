@@ -29,6 +29,7 @@ def init_model(sim: Simulation, cfg: Namelist) -> ModelFn:
         z=z_mo,
         sim_funcs=sim.mo_settings.sim_funcs,
         prescribe="th_s" if sim.forcing.w_th_s is None else "w_th_s",
+        n_iter=cfg.mo_n_iter,
     )
 
     # Init MYNN scheme

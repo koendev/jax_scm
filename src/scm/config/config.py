@@ -40,6 +40,8 @@ class Namelist(pydantic.BaseModel):
     # todo: implement timer outside simulate function and only pass callback. Then jitting should work.
     print_advanced_status: bool = True
 
+    mo_n_iter: int = 10  # Number of iterations for MO solver. Increase for more accuracy, but also more runtime.
+
     @pydantic.model_validator(mode="after")
     def implicit_no_adaptive(self) -> Self:
         """If time_int is implicit, adaptive_timestep must be None."""
