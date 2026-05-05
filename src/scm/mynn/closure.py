@@ -12,6 +12,7 @@ from scm.grid import StaggeredGrid
 from scm.interfaces import ClosureFn
 from scm.mo import MOResult
 from scm.mynn.interfaces import DiagVarsMYNN, GradVarsMYNN, ProgVarsMYNN
+from scm.safe_math import safe_root
 
 
 @jax.tree_util.register_dataclass
@@ -33,12 +34,20 @@ class MYNNParams:
     C4: float = 0.0
     C5: float = 0.2
     gamma1: float = 0.235  # below eq A4, NN09
-    g_m_min: float = 1e-12  # numerical stabilizer for G_M denominator
+    g_m_min: float = 1e-12  # numerical stabilizer for G_M denominator todo: this shouldn't be here
+
+
+def filter_121(x: jnp.ndarray) -> jnp.ndarray:
+    """1-2-1 filter to suppress vertical oscillations."""
+    # "reflect" padding at boundaries: top value becomes (x[-2]+x[-1])/2, which is more effective
+    # at damping oscillations there than edge padding which weights L[-1] at 3/4.
+    x_padded = jnp.pad(x, 1, mode="reflect")
+    return (x_padded[:-2] + 2 * x_padded[1:-1] + x_padded[2:]) / 4
 
 
 def get_qke_sfc(u_st: jnp.ndarray, B1: float) -> jnp.ndarray:
     """Surface boundary condition for QKE (q^2 = 2*TKE)."""
-    return B1 ** (2 / 3) * u_st**2  # MY82, eq. 54
+    return safe_root(B1, 2 / 3) * u_st**2  # MY82, eq. 54
 
 
 def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
@@ -76,16 +85,20 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
     def _closure(state: ProgVarsMYNN, grads: GradVarsMYNN, mo_res: MOResult, params: MYNNParams) -> DiagVarsMYNN:
         # Unpack params for readability
         A1, A2, B1, B2, C1 = params.A1, params.A2, params.B1, params.B2, params.C1
-        C2, C3, C4, C5 = params.C2, params.C3, params.C4, params.C5
+        C2, C3, _, C5 = params.C2, params.C3, params.C4, params.C5
         gamma1, g_m_min = params.gamma1, params.g_m_min
 
         # In MYNN, qke (q^2) is 2*TKE not specific humidity!
-        qke_sfc = get_qke_sfc(u_st=mo_res.u_st, B1=B1)
+        qke_sfc_h = get_qke_sfc(u_st=mo_res.u_st, B1=B1)
         qke_top_h = 1.5 * state.qke[-1] - 0.5 * state.qke[-2]  # linear extrapolation to top half-level
         qke_h = jnp.concatenate(
-            [jnp.atleast_1d(qke_sfc), (state.qke[:-1] + state.qke[1:]) / 2, jnp.atleast_1d(qke_top_h)]
+            [
+                jnp.atleast_1d(qke_sfc_h),
+                (state.qke[:-1] + state.qke[1:]) / 2,
+                jnp.atleast_1d(qke_top_h),
+            ]
         )
-        q = jnp.sqrt(jnp.clip(qke_h, min=consts.qke_min))  # turbulent velocity scale
+        q = safe_root(qke_h, 1 / 2, eps=consts.qke_min)  # turbulent velocity scale
 
         # Virtual potential temperature gradient needed for buoyancy terms
         thv = conv.t_to_tv(t=state.th, qv=state.qv)
@@ -95,10 +108,10 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
 
         ## Length scale (all on half-levels)
         # Surface length scale (eq 53, NN09)
-        zeta = grid.zh / mo_res.L
+        zeta = grid.zh / mo_res.L  # todo: switch to zeta from MOResults
         L_S = jnp.where(
             zeta < 0,
-            consts.kappa * grid.zh * jnp.clip(1 - 100 * zeta, a_min=consts.smooth_eps) ** 0.2,
+            consts.kappa * grid.zh * safe_root(1 - 100 * zeta, 0.2),
             jnp.where(
                 zeta < 1,
                 consts.kappa * grid.zh * (1 + 2.7 * zeta) ** (-1),  # 0 <= zeta < 1
@@ -111,41 +124,31 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
 
         # Buoyance length scale (eq 55, NN09)
         th_0 = th_ref
-        N = jnp.sqrt(jnp.clip(consts.g / th_0 * dthv_dz, a_min=consts.smooth_eps))  # in line after eq 55, NN09
-        q_c = jnp.clip((consts.g / th_0) * mo_res.w_thv * L_T, a_min=consts.smooth_eps) ** (
-            1 / 3
-        )  # in line after eq 55, NN09
-        # N_safe: used in false-branch of jnp.where to prevent NaN gradients when dthv_dz<=0.
-        # The true-branch returns inf so N never actually divides there, but AD still
-        # differentiates the false-branch expression; N_safe keeps ∂/∂N finite.
-        N_safe = jnp.maximum(N, consts.smooth_eps)
+        N = safe_root(consts.g / th_0 * dthv_dz, 1 / 2)  # in line after eq 55, NN09
+        q_c = safe_root((consts.g / th_0) * mo_res.w_thv * L_T, 1 / 3)  # in line after eq 55, NN09
         L_B = jnp.where(
             dthv_dz <= 0,
             jnp.inf,
             jnp.where(
                 zeta >= 0,
-                q / N_safe,
-                (1 + 5 * (q_c / (L_T * N_safe)) ** (1 / 2)) * q / N_safe,
+                q / N,
+                (1 + 5 * safe_root(q_c / (L_T * N), 1 / 2)) * q / N,
             ),
         )
 
         # Final length scale
         L = (1 / L_S + 1 / L_T + 1 / L_B) ** -1
 
-        # 1-2-1 filter to suppress vertical oscillations driven by L_B = q/N amplifying
-        # numerical noise in qke above the BL. Filtering L upstream makes Km/Kh smooth too.
-        # "reflect" padding at boundaries: top value becomes (L[-2]+L[-1])/2, more effective
-        # at damping oscillations there than edge padding which weights L[-1] at 3/4.
-        L_padded = jnp.pad(L, 1, mode="reflect")
-        L = (L_padded[:-2] + 2 * L_padded[1:-1] + L_padded[2:]) / 4
+        # 1-2-1 filter to suppress vertical oscillations driven by L_B = q/N amplifying numerical noise in qke above the BL.
+        L = filter_121(L)
 
-        # todo: check what this does
+        ## Begin closure
         G_M = L**2 / q**2 * (grads.u**2 + grads.v**2)  # eq 39, NN09
         # G_H = -(L**2) / q**2 * consts.g / th_0 * (beta_th * grads.th_l + beta_q * grads.q_w)  # eq 40, NN09
         G_H = -(L**2) / q**2 * consts.g / th_0 * dthv_dz  # eq 40, NN09 (virt. pot. temp. version)
-        Ri = -G_H / (G_M + g_m_min)  # above eq A11, NN09, gradient Richardson number
+        Ri = -G_H / (G_M + g_m_min)  # above eq A11, NN09, gradient Richardson number todo: g_min to clip
 
-        ## Level-2 closure
+        # Level-2 closure
         gamma2 = (2 * A1 * (3 - 2 * C2) + B2 * (1 - C3)) / B1  # eq A5, NN09
         F1 = B1 * (gamma1 - C1) + 2 * A1 * (3 - 2 * C2) + 3 * A2 * (1 - C2) * (1 - C5)  # eq A6, NN09
         F2 = B1 * (gamma1 + gamma2) - 3 * A1 * (1 - C2)  # eq A7, NN09
@@ -158,17 +161,15 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         Ri1 = 0.5 * A2 * F2 / (A1 * F1)
         Ri2 = 0.5 * Rf1 / Ri1
         Ri3 = (2 * Rf2 - Rf1) / Ri1
-        Rf = Ri1 * (
-            Ri + Ri2 - (jnp.clip(Ri**2 - Ri3 * Ri + Ri2**2, a_min=consts.smooth_eps)) ** (1 / 2)
-        )  # eq A11, NN09
+        Rf = Ri1 * (Ri + Ri2 - safe_root(Ri**2 - Ri3 * Ri + Ri2**2, 1 / 2))  # eq A11, NN09
 
         # Level-2 stability functions
         SH2 = 3 * A2 * (gamma1 + gamma2) * (Rfc - Rf) / (1 - Rf)  # eq A4, NN09
         SM2 = (A1 * F1) / (A2 * F2) * (Rf1 - Rf) / (Rf2 - Rf) * SH2  # eq A3, NN09
 
         # Diagnosed level-2 tke
-        q2_sq = B1 * L**2 * SM2 * (1 - Rf) * (grads.u**2 + grads.v**2)  # eq A2, NN09
-        q2 = jnp.sqrt(jnp.clip(q2_sq, a_min=consts.qke_min))  # floor avoids grad(sqrt(0))=inf at surface where L=0
+        qke_diag = B1 * L**2 * SM2 * (1 - Rf) * (grads.u**2 + grads.v**2)  # eq A2, NN09
+        q2 = safe_root(qke_diag, 1 / 2, eps=consts.qke_min)
 
         ## Level-2.5 closure
         alpha_c = jnp.where(q < q2, q / q2, 1.0)  # eq 42, NN09
@@ -197,13 +198,11 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         SM = SM25
         SH = SH25
 
-        # 1-2-1 filter on stability functions to suppress oscillations from noisy velocity
-        # and temperature gradients. Filtering here propagates smooth values into all three
-        # diffusivities (Km, Kh, Kq) consistently, including the QKE transport term.
-        SM_padded = jnp.pad(SM, 1, mode="reflect")
-        SM = (SM_padded[:-2] + 2 * SM_padded[1:-1] + SM_padded[2:]) / 4
-        SH_padded = jnp.pad(SH, 1, mode="reflect")
-        SH = (SH_padded[:-2] + 2 * SH_padded[1:-1] + SH_padded[2:]) / 4
+        # 1-2-1 filter on stability functions to suppress oscillations from noisy velocity and temperature gradients.
+        # Filtering here propagates smooth values into all three diffusivities (Km, Kh, Kq) consistently,
+        # including the QKE transport term.
+        SM = filter_121(SM)
+        SH = filter_121(SH)
 
         Sq = 3 * SM  # eq 67, NN09
 
@@ -228,7 +227,7 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         w_th = w_th.at[0].set(mo_res.w_th)
         w_thv = w_thv.at[0].set(mo_res.w_thv)
         w_qv = w_qv.at[0].set(mo_res.w_qv)
-        w_qke = w_qke.at[0].set(0.0)  # todo: Gemini says this. Confirm!
+        w_qke = w_qke.at[0].set(0.0)
 
         # Parameterized dry pot. temp. variance
         lam2 = B2 * L  # eq 12, MY82
@@ -243,13 +242,13 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
 
         L_full = (L[1:] + L[:-1]) / 2
         L_full = jnp.maximum(L_full, consts.L_min)  # guard against L→0 giving infinite dissipation
-        eps = state.qke ** (3 / 2) / (B1 * L_full)  # dissipation, eq. 12, NN09 (q^3 = (q^2)^(3/2))
+        eps = state.qke ** (3 / 2) / (B1 * L_full)  # dissipation, eq. 12, NN09 (q^3 = (q^2)^(3/2)) todo: safe_root?
 
         # CT2
         # Simplified to avoid NaN from 0 * inf when L=0, since th_th is proportional to L.
         # ct2 = 3.2 * B1 ** (1 / 3) / B2 * L ** (-2 / 3) * th_th
         # th_th = -lam2 / q * th_w * dth_dz, where lam2 = B2 * L
-        ct2 = -3.2 * B1 ** (1 / 3) * jnp.clip(L, a_min=consts.smooth_eps) ** (1 / 3) / q * w_th * grads.th
+        ct2 = -3.2 * safe_root(B1 * L, 1 / 3) / q * w_th * grads.th
 
         return DiagVarsMYNN(
             u_w=u_w,
