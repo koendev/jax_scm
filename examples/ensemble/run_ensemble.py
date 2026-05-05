@@ -24,7 +24,7 @@ def run() -> xr.Dataset:
     sim = get_gabls1(Nz=64, plot=False)
     cfg = Namelist(
         adaptive_timestep=AdaptiveTimestepConfig(cfl_max=0.05),
-        log_level=LogLevel.SILENT,  # needs to be off for `simulate` to compile.
+        log_level=LogLevel.BEGIN_END,  # progress logging doesn't handle multiple members
     )
     model = init_model(sim, cfg=cfg)
 

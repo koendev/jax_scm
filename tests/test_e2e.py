@@ -6,7 +6,7 @@ import pytest
 import xarray as xr
 from shared import FIXTURE_ROOT
 
-from scm.config import load_namelist
+from scm.config import LogLevel, load_namelist
 from scm.examples.andren1994.andren1994 import get_andren1994
 from scm.examples.gabls1 import get_gabls1
 from scm.examples.wangara.wangara import get_wangara_day33
@@ -71,6 +71,7 @@ def test_e2e(case: str) -> None:
 
     ds = xr.open_dataset(fixture_dir / spec.out_file)
     cfg = load_namelist(fixture_dir / spec.namelist)
+    cfg.log_level = LogLevel.SILENT
 
     with jax.enable_x64():
         sim = spec.get_sim()

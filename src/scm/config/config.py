@@ -14,8 +14,8 @@ class LogLevel(StrEnum):
     """Verbosity for `simulate`."""
 
     SILENT = "silent"  # nothing is printed
-    BOUNDARY = "boundary"  # only "begin" and "complete" messages
-    PROGRESS = "progress"  # boundary + per-outer-step progress with ETA
+    BEGIN_END = "begin_end"  # only "begin" and "complete" messages
+    STEPS = "steps"  # boundary + per-outer-step progress with ETA
 
 
 class TimeIntMethod(StrEnum):
@@ -45,7 +45,7 @@ class Namelist(pydantic.BaseModel):
 
     # Verbosity of the simulation loop. SILENT is required when wrapping `simulate`
     # in transforms that disallow host callbacks (e.g. some grad/vmap setups).
-    log_level: LogLevel = LogLevel.PROGRESS
+    log_level: LogLevel = LogLevel.STEPS
 
     mo_n_iter: int = 10  # Number of iterations for MO solver. Increase for more accuracy, but also more runtime.
 

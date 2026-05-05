@@ -6,10 +6,14 @@ import pytest
 from shared import FIXTURE_ROOT
 
 from scm import mo
+from scm.config import LogLevel, load_namelist
+from scm.examples.gabls1 import get_gabls1
 from scm.grid import StaggeredGrid
 from scm.mynn import closure
 from scm.mynn.closure import MYNNParams
 from scm.mynn.interfaces import GradVarsMYNN, ProgVarsMYNN
+from scm.mynn.model import init_model
+from scm.time_stepping import simulate
 
 
 @pytest.fixture
@@ -184,14 +188,8 @@ def test_mynn_mo_res_diffable(mynn_state):
 
 def test_e2e_diffable():
     """Test end-to-end differentiability of a short simulation"""
-    from scm.config import load_namelist
-    from scm.examples.gabls1 import get_gabls1
-    from scm.mynn.model import init_model
-    from scm.time_stepping import simulate
-
     cfg = load_namelist(FIXTURE_ROOT / "gabls1/namelist_cn.yaml")
     cfg.dt_s_out = cfg.dt_s_out  # output every step
-    from scm.config import LogLevel
 
     cfg.log_level = LogLevel.SILENT  # avoid host callbacks under grad
 

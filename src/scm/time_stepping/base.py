@@ -42,9 +42,7 @@ def simulate(model: ModelFn, sim: Simulation, cfg: Namelist, params=None) -> Out
                 return (new_carry, i + 1, t_curr + dt, t_left - dt, jnp.minimum(dt_min, dt))
 
             loop_init = (carry, 0, t.astype(float), dt_out, jnp.array(jnp.inf))
-            new_carry, n_inner, _, _, dt_min = jax.lax.while_loop(
-                lambda c: c[3] > 0, _while_body, loop_init
-            )
+            new_carry, n_inner, _, _, dt_min = jax.lax.while_loop(lambda c: c[3] > 0, _while_body, loop_init)
             info = {"n_inner": n_inner, "dt_min": dt_min}
             return new_carry, new_carry, info
 
