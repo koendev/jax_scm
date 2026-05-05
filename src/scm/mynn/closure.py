@@ -18,11 +18,7 @@ from scm.safe_math import safe_root
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True)
 class MYNNParams:
-    """MYNN level-2.5 closure constants (Nakanishi & Niino 2009, eq 66).
-
-    All fields are JAX pytree leaves. For gradient-based optimization, construct
-    with ``jnp.array`` values or convert via ``jax.tree_util.tree_map(jnp.asarray, MYNNParams())``.
-    """
+    """MYNN level-2.5 closure constants (Nakanishi & Niino 2009, eq 66)."""
 
     A1: float = 1.18
     A2: float = 0.665
@@ -34,7 +30,6 @@ class MYNNParams:
     C4: float = 0.0
     C5: float = 0.2
     gamma1: float = 0.235  # below eq A4, NN09
-    g_m_min: float = 1e-12  # numerical stabilizer for G_M denominator todo: this shouldn't be here
 
 
 def filter_121(x: jnp.ndarray) -> jnp.ndarray:
@@ -86,7 +81,7 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         # Unpack params for readability
         A1, A2, B1, B2, C1 = params.A1, params.A2, params.B1, params.B2, params.C1
         C2, C3, _, C5 = params.C2, params.C3, params.C4, params.C5
-        gamma1, g_m_min = params.gamma1, params.g_m_min
+        gamma1 = params.gamma1
 
         # In MYNN, qke (q^2) is 2*TKE not specific humidity!
         qke_sfc_h = get_qke_sfc(u_st=mo_res.u_st, B1=B1)
@@ -146,7 +141,7 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         G_M = L**2 / q**2 * (grads.u**2 + grads.v**2)  # eq 39, NN09
         # G_H = -(L**2) / q**2 * consts.g / th_0 * (beta_th * grads.th_l + beta_q * grads.q_w)  # eq 40, NN09
         G_H = -(L**2) / q**2 * consts.g / th_0 * dthv_dz  # eq 40, NN09 (virt. pot. temp. version)
-        Ri = -G_H / (G_M + g_m_min)  # above eq A11, NN09, gradient Richardson number todo: g_min to clip
+        Ri = -G_H / jnp.maximum(G_M, consts.smooth_eps)  # above eq A11, NN09, gradient Richardson number
 
         # Level-2 closure
         gamma2 = (2 * A1 * (3 - 2 * C2) + B2 * (1 - C3)) / B1  # eq A5, NN09
