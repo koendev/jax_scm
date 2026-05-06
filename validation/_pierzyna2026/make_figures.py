@@ -26,7 +26,7 @@ plt.rcParams.update(
         "font.family": "serif",
         "font.size": 8,
         "text.usetex": True,
-        "text.latex.preamble": r"\usepackage{amsmath}",
+        "text.latex.preamble": r"\usepackage{amsmath}\usepackage{amssymb}",
         "figure.dpi": 300,
         # "figure.labelsize": 8,
         "lines.linewidth": 1.0,
@@ -44,6 +44,8 @@ COLORS = {
     "qv": "C3",
     "qke": "C4",
 }
+REF_KW = {"color": "lightgrey", "linewidth": 1.0}
+JAX_SCM_KW = {"color": "C1", "linewidth": 1.5}
 
 LABELS_PRETTY = {
     # Mean
@@ -69,11 +71,11 @@ UNITS = {
     "v": "m s$^{-1}$",
     "th": "K",
     "thC": r"$^{\circ}$C",
-    "qv": "g kg$^{-1}$",
+    "qv": "g kg$^{-1}$",  # ATTENTION! Native unit: kg/kg
     "qke": "m$^2$ s$^{-2}$",
     "th_s": "K",
     "w_th": "K m s$^{-1}$",
-    "w_qv": "g kg$^{-1}$ m s$^{-1}$",
+    "w_qv": "g kg$^{-1}$ m s$^{-1}$",  # ATTENTION! Native unit: kg/kg m/s
     "u_w": "m$^2$ s$^{-2}$",
     "v_w": "m$^2$ s$^{-2}$",
     "u_st": "m s$^{-1}$",
@@ -163,6 +165,11 @@ def _add_is_const(v: jnp.ndarray, ax: plt.Axes, x: float = 0.95, y: float = 0.95
         ha = "right"
 
     ax.text(x, y, label, transform=ax.transAxes, ha=ha, va="top", fontsize=6, color=color)
+
+
+def _xticks_only(ax: plt.Axes) -> None:
+    """Keep y ticks, but turn labels off"""
+    ax.tick_params(axis="x", which="both", bottom=True, labelbottom=False)
 
 
 def _yticks_only(ax: plt.Axes) -> None:
@@ -281,69 +288,69 @@ def plot_a94_res(sps: SimPlotSpec) -> plt.Figure:
     def _plot_ref(ax: plt.Axes, path: pathlib.Path, sort: str = "x") -> None:
         """Overplot all digitized reference curves on ax (A94 multi-model style)."""
         for label, (x, y) in _read_ref_csv(path, sort=sort).items():
-            ax.plot(x, y, label=label, color="k", lw=0.75)
+            ax.plot(x, y, label=label, **REF_KW)
 
     ds = xr.open_dataset(sps.out_file)
     ds_pp = postproc_andren1994(ds)
     tf = ds["time"]  # time in dataframe is normalized with f, so tf = t * f
 
-    jax_kw = dict(color="C1", lw=1, label="jax-scm")
-
-    fig = plt.figure(figsize=(7, 4), constrained_layout=True)
-    gs = fig.add_gridspec(nrows=2, ncols=3)
+    fig = plt.figure(figsize=(FIG_WIDTH * 0.45, FIG_WIDTH * 0.65), constrained_layout=True)
+    gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=(1, 1, 1, 2))
 
     # Time series plots in first row
     ax = fig.add_subplot(gs[0, 0])
     _plot_ref(ax, sps.ref_dir / "a94_fig2.csv")
-    ax.plot(tf, ds_pp["tke_int_norm"], **jax_kw)
-    ax.set_xlabel("$t f$, -")
+    ax.plot(tf, ds_pp["tke_int_norm"], **JAX_SCM_KW)
     ax.set_xlim(0, 10)
+    _xticks_only(ax)
     ax.set_ylim(0, 1.25)
-    ax.set_yticks(np.arange(0, 1.6, 0.25))
-    ax.set_ylabel(r"$f \int q^2/2 \, dz \; / \; u_*^3$")
+    ax.set_ylabel(r"$f \int q^2/2\,dz / u_*^3$")
 
-    ax = fig.add_subplot(gs[0, 1])
+    ax = fig.add_subplot(gs[1, 0], sharex=ax)
     _plot_ref(ax, sps.ref_dir / "a94_fig3a.csv")
-    ax.plot(tf, ds_pp["C_u"], **jax_kw)
-    ax.set_xlabel("$t f$, -")
+    ax.plot(tf, ds_pp["C_u"], **JAX_SCM_KW)
     ax.set_xlim(0, 10)
+    _xticks_only(ax)
     ax.set_ylim(0, 2)
     ax.set_ylabel(r"$C_u$")
 
-    ax = fig.add_subplot(gs[0, 2])
+    ax = fig.add_subplot(gs[2, 0], sharex=ax)
     _plot_ref(ax, sps.ref_dir / "a94_fig3b.csv")
-    ax.plot(tf, ds_pp["C_v"], **jax_kw)
+    ax.plot(tf, ds_pp["C_v"], **JAX_SCM_KW)
     ax.set_xlabel("$t f$, -")
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 3)
     ax.set_ylabel(r"$C_v$")
 
     # Normalied profiles in second row
-    ax = fig.add_subplot(gs[1, 0])
-    _plot_ref(ax, sps.ref_dir / "a94_fig4a.csv", sort="y")
-    ax.plot(ds_pp["phi_m"], ds_pp["zh_phi_"], **jax_kw)
-    ax.set_xlabel(r"$\Phi_m$")
-    ax.set_xlim(0, 2)
-    ax.set_ylabel(r"$z f/u_*$")
-    ax.set_ylim(0, 0.1)
+    gs_sub = gs[3, :].subgridspec(nrows=1, ncols=2, width_ratios=(1, 1))
 
-    ax_uw = fig.add_subplot(gs[1, 1])
+    label_ust = LABELS_PRETTY["u_st"][1:-1]
+    label_z_norm = rf"$z\,f/{label_ust}$"
+
+    ax_uw = fig.add_subplot(gs_sub[0, 0])
     _plot_ref(ax_uw, sps.ref_dir / "a94_fig6a.csv", sort="y")
-    ax_uw.plot(ds_pp["uw_norm"], ds_pp["zh_"], **jax_kw)
+    ax_uw.plot(ds_pp["uw_norm"], ds_pp["zh_"], **JAX_SCM_KW)
     ax_uw.axvline(0, color="k", ls="--", lw=0.75)
-    ax_uw.set_xlabel(r"$\overline{uw}/u_*^2$")
-    ax_uw.set_ylabel(r"$zf/u_*$")
+    label_uw = LABELS_PRETTY["u_w"][1:-1]
+    ax_uw.set_xlabel(rf"${label_uw}/{label_ust}^{{2}}$")
+    ax_uw.set_ylabel(label_z_norm)
     ax_uw.set_ylim(0, 0.35)
 
-    ax_vw = fig.add_subplot(gs[1, 2], sharey=ax_uw)
+    ax_vw = fig.add_subplot(gs_sub[0, 1], sharey=ax_uw)
     _plot_ref(ax_vw, sps.ref_dir / "a94_fig6b.csv", sort="y")
-    ax_vw.plot(ds_pp["vw_norm"], ds_pp["zh_"], **jax_kw)
+    ax_vw.plot(ds_pp["vw_norm"], ds_pp["zh_"], **JAX_SCM_KW)
     ax_vw.axvline(0, color="k", ls="--", lw=0.75)
-    ax_vw.set_xlabel(r"$\overline{vw}/u_*^2$")
-    ax_uw.set_ylabel(r"$zf/u_*$")
 
-    # handles, labels = axes[0, 0].get_legend_handles_labels()
-    # fig.legend(handles, labels, loc="outside lower center", ncol=len(handles), fontsize=7)
+    label_vw = LABELS_PRETTY["v_w"][1:-1]
+    ax_vw.set_xlabel(rf"${label_vw}/{label_ust}^{{2}}$")
+    _yticks_only(ax_vw)
+
+    handles = [
+        mlines.Line2D([], [], color=REF_KW["color"], lw=1, label="Andren et al. (1994)"),
+        mlines.Line2D([], [], color=JAX_SCM_KW["color"], lw=1, label="JAX-SCM"),
+    ]
+    fig.legend(handles=handles, loc="outside upper center", ncol=len(handles), fontsize=7)
 
     return fig
 
@@ -361,10 +368,10 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     ds_pp = postproc_wangara(ds)
     ds_tke_budget = ds_pp.sel(time=t_1400)
 
-    ref_kw = dict(ls="--", lw=0.75, alpha=0.8)
-
-    fig = plt.figure(figsize=(FIG_WIDTH, 5), constrained_layout=True)
-    gs = fig.add_gridspec(nrows=2, ncols=6)
+    fig = plt.figure(figsize=(FIG_WIDTH, FIG_WIDTH * 0.6), constrained_layout=True)
+    gs = fig.add_gridspec(nrows=2, ncols=6, height_ratios=(1, 1))
+    ref_kw = {**REF_KW, "ls": "--"}
+    ref_kw.pop("color")  # coloring by time for WG33
 
     # --- Potential temperature ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig3.csv", sort="y")
@@ -380,10 +387,12 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig4.csv", sort="y")
     ax = fig.add_subplot(gs[0, 1], sharey=ax)
     for i in range(1, 5):
-        ax.plot(*ref[t_short[i]], color=colors[i], **ref_kw)
-        ax.plot(ds["w_th"].isel(time=i) * 100, ds["zh"], color=colors[i], label=t_short[i])
+        x, y = ref[t_short[i]]
+        ax.plot(x / 100, y, color=colors[i], **ref_kw)
+        ax.plot(ds["w_th"].isel(time=i), ds["zh"], color=colors[i], label=t_short[i])
     ax.axvline(0, color="k", ls="dotted", lw=0.75)
-    ax.set_xlabel(f"{LABELS_PRETTY['w_th']}, $10^{{-2}}$ {UNITS['w_th']}")
+    ax.set_xlabel(f"{LABELS_PRETTY['w_th']}, {UNITS['w_th']}")
+    _yticks_only(ax)
 
     # --- Water vapor ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig8.csv", sort="y")
@@ -392,15 +401,19 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
         ax.plot(*ref[t], color=colors[i], **ref_kw)
         ax.plot(ds["qv"].isel(time=i) * 1000, ds["z"], color=colors[i], label=t)
     ax.set_xlabel(f"{LABELS_PRETTY['qv']}, {UNITS['qv']}")
+    ax.set_xlim(0, None)
+    _yticks_only(ax)
 
     # --- Moisture flux ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig9.csv", sort="y")
     ax = fig.add_subplot(gs[0, 3], sharey=ax)
     for i in range(1, 5):
-        ax.plot(*ref[t_short[i]], color=colors[i], **ref_kw)
-        ax.plot(ds["w_qv"].isel(time=i) * 1e5, ds["zh"], color=colors[i], label=t_short[i])
+        x, y = ref[t_short[i]]
+        ax.plot(x / 1e2, y, color=colors[i], **ref_kw)
+        ax.plot(ds["w_qv"].isel(time=i) * 1e3, ds["zh"], color=colors[i], label=t_short[i])
     ax.axvline(0, color="k", ls="dotted", lw=0.75)
-    ax.set_xlabel(f"{LABELS_PRETTY['w_qv']}, $10^{{-5}}$ {UNITS['w_qv']}")
+    ax.set_xlabel(f"{LABELS_PRETTY['w_qv']}, {UNITS['w_qv']}")
+    _yticks_only(ax)
 
     # --- TKE ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig5.csv", sort="y")
@@ -409,6 +422,7 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
         ax.plot(*ref[t_short[i]], color=colors[i], **ref_kw)
         ax.plot(ds["qke"].isel(time=i) / 2, ds["z"], color=colors[i], label=t_short[i])
     ax.set_xlabel(f"{LABELS_PRETTY['tke']}, {UNITS['qke']}")
+    _yticks_only(ax)
 
     # --- Length scale ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig7.csv", sort="y")
@@ -417,9 +431,10 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
         ax.plot(*ref[t_short[i]], color=colors[i], **ref_kw)
         ax.plot(ds["L"].isel(time=i), ds["zh"], color=colors[i], label=t_short[i])
     ax.set_xlabel(f"{LABELS_PRETTY['L']}, m")
+    _yticks_only(ax)
 
     # Figure-level legend: time colors + NN09 reference marker
-    proxy_ref = mlines.Line2D([], [], color="k", lw=0.75, ls="--", alpha=0.8, label="NN09 (ref)")
+    proxy_ref = mlines.Line2D([], [], color="k", ls=ref_kw["ls"], label="Nakanishi and Niino (2009)")
     handles = [mlines.Line2D([], [], color=colors[i], label=t) for i, t in enumerate(t_short)]
     handles.append(proxy_ref)
     fig.legend(handles=handles, loc="outside upper center", ncol=len(handles), fontsize=7)
@@ -439,37 +454,40 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
         ds_tke_budget["div_w_tke"].values,
         ds["z"].values,
         color="C2",
-        label=r"$\partial/\partial z \left( w'e' \right)$",
+        label=r"$\langle w q^2 \rangle / 2$ div.",
     )
     ax.plot(-ds_tke_budget["tke_eps"].values, ds["z"], color="C3", label=r"$-\epsilon$")
     ax.set_xlim(-1, 1)
-    ax.set_xlabel(r"$x z_i / w_*^3$")
+    ax.set_xlabel(r"$\square\, z_i / w_*^3$, --")
     ax.set_ylabel("z, m")
-    ax.legend(fontsize=6, loc="upper left", ncols=2)
+    ax.legend(fontsize=6, loc="upper center", ncols=2)
 
     # --- Mixed layer parameters scatter (Table 1) ---
     def _annotate_scatter(ax: plt.Axes, label: str) -> None:
         xmin, xmax = ax.get_xlim()
         ymin, ymax = ax.get_ylim()
         vmin, vmax = min(xmin, ymin), max(xmax, ymax)
-        ax.plot([vmin, vmax], [vmin, vmax], "k--", lw=0.75)
+        ax.plot([vmin, vmax], [vmin, vmax], color="k", ls="dotted", lw=0.75)
         ax.set_xlabel(f"{label} (NN09)")
-        ax.set_ylabel(f"{label} (jax-scm)")
+        ax.set_ylabel(f"{label} (JAX-SCM)")
 
     df = pd.read_csv(sps.ref_dir / "nn09_tab1.csv")
     c = np.linspace(0, 1, len(df))
 
     ax = fig.add_subplot(gs_sub[0, 1])
     ax.scatter(df["neg_R"], -ds_pp["R"][1:], c=c, s=10)
-    _annotate_scatter(ax, "-R")
+    ax.set_aspect("equal")
+    _annotate_scatter(ax, "$-R$")
 
     ax = fig.add_subplot(gs_sub[0, 2])
     ax.scatter(df["zi"], ds_pp["zi"][1:], c=c, s=10)
-    _annotate_scatter(ax, "zi, m")
+    ax.set_aspect("equal")
+    _annotate_scatter(ax, "$z_i$, m")
 
     ax = fig.add_subplot(gs_sub[0, 3])
     ax.scatter(df["w_st"], ds_pp["w_st"][1:], c=c, s=10)
-    _annotate_scatter(ax, r"$w_*$, m/s")
+    ax.set_aspect("equal")
+    _annotate_scatter(ax, rf"$w_*$, {UNITS['u_st']}")
 
     return fig
 
@@ -478,14 +496,12 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
     """Plot GABLS1 results against Cuxart et al. (2006) multi-model reference."""
 
     def _plot_ref(ax: plt.Axes, path: pathlib.Path, sort: str = "x") -> None:
-        ref_kw = dict(color="k", lw=0.75, alpha=0.6)
         for x, y in _read_ref_csv(path, sort=sort).values():
-            ax.plot(x, y, **ref_kw)
+            ax.plot(x, y, **REF_KW)
 
     ds = xr.open_dataset(sps.out_file)
     ds_pp = postproc_gabls1(ds)
     t_min = ds["time"] * 60  # h to min
-    jax_kw = dict(color="C1", lw=1, label="jax-scm")
 
     fig = plt.figure(figsize=(FIG_WIDTH, FIG_WIDTH / 2), constrained_layout=True)
     gs = fig.add_gridspec(nrows=2, ncols=6)
@@ -493,43 +509,44 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
     # --- Profiles at 9 h ---
     ax_m = fig.add_subplot(gs[0, 0])
     _plot_ref(ax_m, sps.ref_dir / "fig03_m.csv", sort="y")
-    ax_m.plot(ds_pp["m"].isel(time=-1), ds["z"], **jax_kw)
+    ax_m.plot(ds_pp["m"].isel(time=-1), ds["z"], **JAX_SCM_KW)
     ax_m.set_xlim(0, 11)
+    ax_m.set_xticks([0, 5, 10])
     ax_m.set_ylim(0, 400)
     ax_m.set_xlabel(f"{LABELS_PRETTY['m']}, {UNITS['u']}")
     ax_m.set_ylabel("z, m")
 
     ax = fig.add_subplot(gs[0, 1], sharey=ax_m)
     _plot_ref(ax, sps.ref_dir / "fig03_th.csv", sort="y")
-    ax.plot(ds["th"].isel(time=-1), ds["z"], **jax_kw)
+    ax.plot(ds["th"].isel(time=-1), ds["z"], **JAX_SCM_KW)
     ax.set_xlim(262.5, 268)
     ax.set_xlabel(f"{LABELS_PRETTY['th']}, {UNITS['th']}")
     _yticks_only(ax)
 
     ax = fig.add_subplot(gs[0, 2], sharey=ax_m)
     _plot_ref(ax, sps.ref_dir / "fig04_hfx.csv", sort="y")
-    ax.plot(ds["w_th"].isel(time=-1), ds["zh"], **jax_kw)
+    ax.plot(ds["w_th"].isel(time=-1), ds["zh"], **JAX_SCM_KW)
     ax.set_xlim(-0.02, 0)
     ax.set_xlabel(f"{LABELS_PRETTY['w_th']}, {UNITS['w_th']}")
     _yticks_only(ax)
 
     ax = fig.add_subplot(gs[0, 3], sharey=ax_m)
     _plot_ref(ax, sps.ref_dir / "fig04_momentum.csv", sort="y")
-    ax.plot(ds_pp["tau"].isel(time=-1), ds["zh"], **jax_kw)
+    ax.plot(ds_pp["tau"].isel(time=-1), ds["zh"], **JAX_SCM_KW)
     ax.set_xlim(0, 0.15)
     ax.set_xlabel(rf"$\tau$, {UNITS['u_w']}")
     _yticks_only(ax)
 
     ax = fig.add_subplot(gs[0, 4], sharey=ax_m)
     _plot_ref(ax, sps.ref_dir / "fig06_Km.csv", sort="y")
-    ax.plot(ds["Km"].isel(time=-1), ds["zh"], **jax_kw)
+    ax.plot(ds["Km"].isel(time=-1), ds["zh"], **JAX_SCM_KW)
     ax.set_xlim(0, 6)
     ax.set_xlabel(rf"$K_m$, {UNITS['K_m']}")
     _yticks_only(ax)
 
     ax = fig.add_subplot(gs[0, 5], sharey=ax_m)
     _plot_ref(ax, sps.ref_dir / "fig06_Kh.csv", sort="y")
-    ax.plot(ds["Kh"].isel(time=-1), ds["zh"], **jax_kw)
+    ax.plot(ds["Kh"].isel(time=-1), ds["zh"], **JAX_SCM_KW)
     ax.set_xlim(0, 6)
     ax.set_xlabel(rf"$K_h$, {UNITS['K_m']}")
     _yticks_only(ax)
@@ -539,20 +556,25 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
 
     ax = fig.add_subplot(gs_sub[0, 0])
     _plot_ref(ax, sps.ref_dir / "fig02_blh.csv", sort="x")
-    ax.plot(t_min, ds_pp["blh"], **jax_kw)
+    ax.plot(t_min, ds_pp["blh"], **JAX_SCM_KW)
     ax.set_xlim(0, 540)
     ax.set_ylim(0, 400)
-    ax.set_xlabel("$t$, h")
+    ax.set_xlabel("$t$, min")
     ax.set_ylabel("BLH, m")
 
     ax = fig.add_subplot(gs_sub[0, 1])
     _plot_ref(ax, sps.ref_dir / "fig02_ust.csv", sort="x")
-    ax.plot(t_min, ds["mo_u_st"], **jax_kw)
+    ax.plot(t_min, ds["mo_u_st"], **JAX_SCM_KW)
     ax.set_xlim(0, 540)
     ax.set_ylim(0.2, 0.5)
-    ax.set_xlabel("$t$, h")
+    ax.set_xlabel("$t$, min")
     ax.set_ylabel(f"{LABELS_PRETTY['u_st']}, {UNITS['u_st']}")
-    ax.legend(fontsize=6)
+
+    handles = [
+        mlines.Line2D([], [], color=REF_KW["color"], lw=1, label="Cuxart et al. (2006) SCMs"),
+        mlines.Line2D([], [], color=JAX_SCM_KW["color"], lw=1, label="JAX-SCM"),
+    ]
+    fig.legend(handles=handles, loc="outside upper center", ncol=len(handles), fontsize=7)
 
     return fig
 
@@ -563,12 +585,12 @@ if __name__ == "__main__":
     #     fig_ic_bc.savefig(FIG_ROOT / f"ic_bc_{sim.short_name}.pdf")
     #
     sps_a94, sps_gab1, sps_wg33 = sims
-    #
-    # fig_a94 = plot_a94_res(sps_a94)
-    # fig_a94.savefig(FIG_ROOT / "res_A94.pdf")
+
+    fig_a94 = plot_a94_res(sps_a94)
+    fig_a94.savefig(FIG_ROOT / "res_A94.pdf")
 
     fig_gab1 = plot_gabls1_res(sps_gab1)
     fig_gab1.savefig(FIG_ROOT / "res_GAB1.pdf")
 
-    # fig_wg33 = plot_wg33_res(sps_wg33)
-    # fig_wg33.savefig(FIG_ROOT / "res_WG33.pdf")
+    fig_wg33 = plot_wg33_res(sps_wg33)
+    fig_wg33.savefig(FIG_ROOT / "res_WG33.pdf")
