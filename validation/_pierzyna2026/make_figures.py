@@ -177,6 +177,11 @@ def _yticks_only(ax: plt.Axes) -> None:
     ax.tick_params(axis="y", which="both", left=True, labelleft=False)
 
 
+def _add_subplot_label(ax: plt.Axes, l: str, dy: float = 0, dx: float = 0) -> None:
+    """Add subplot label (a), (b), etc. in top left corner of ax."""
+    ax.text(0.025 + dx, 0.975 + dy, f"({l})", ha="left", va="top", transform=ax.transAxes)
+
+
 def plot_ic(sps: SimPlotSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     """Plot initial conditions."""
     ic_gs = gs.subgridspec(nrows=1, ncols=4)
@@ -299,6 +304,7 @@ def plot_a94_res(sps: SimPlotSpec) -> plt.Figure:
 
     # Time series plots in first row
     ax = fig.add_subplot(gs[0, 0])
+    _add_subplot_label(ax, "a", dx=-0.015)
     _plot_ref(ax, sps.ref_dir / "a94_fig2.csv")
     ax.plot(tf, ds_pp["tke_int_norm"], **JAX_SCM_KW)
     ax.set_xlim(0, 10)
@@ -307,6 +313,7 @@ def plot_a94_res(sps: SimPlotSpec) -> plt.Figure:
     ax.set_ylabel(r"$f \int q^2/2\,dz / u_*^3$")
 
     ax = fig.add_subplot(gs[1, 0], sharex=ax)
+    _add_subplot_label(ax, "b", dx=-0.015)
     _plot_ref(ax, sps.ref_dir / "a94_fig3a.csv")
     ax.plot(tf, ds_pp["C_u"], **JAX_SCM_KW)
     ax.set_xlim(0, 10)
@@ -315,6 +322,7 @@ def plot_a94_res(sps: SimPlotSpec) -> plt.Figure:
     ax.set_ylabel(r"$C_u$")
 
     ax = fig.add_subplot(gs[2, 0], sharex=ax)
+    _add_subplot_label(ax, "c", dx=-0.015)
     _plot_ref(ax, sps.ref_dir / "a94_fig3b.csv")
     ax.plot(tf, ds_pp["C_v"], **JAX_SCM_KW)
     ax.set_xlabel("$t f$, -")
@@ -329,6 +337,7 @@ def plot_a94_res(sps: SimPlotSpec) -> plt.Figure:
     label_z_norm = rf"$z\,f/{label_ust}$"
 
     ax_uw = fig.add_subplot(gs_sub[0, 0])
+    _add_subplot_label(ax_uw, "d")
     _plot_ref(ax_uw, sps.ref_dir / "a94_fig6a.csv", sort="y")
     ax_uw.plot(ds_pp["uw_norm"], ds_pp["zh_"], **JAX_SCM_KW)
     ax_uw.axvline(0, color="k", ls="--", lw=0.75)
@@ -338,6 +347,7 @@ def plot_a94_res(sps: SimPlotSpec) -> plt.Figure:
     ax_uw.set_ylim(0, 0.35)
 
     ax_vw = fig.add_subplot(gs_sub[0, 1], sharey=ax_uw)
+    _add_subplot_label(ax_vw, "e")
     _plot_ref(ax_vw, sps.ref_dir / "a94_fig6b.csv", sort="y")
     ax_vw.plot(ds_pp["vw_norm"], ds_pp["zh_"], **JAX_SCM_KW)
     ax_vw.axvline(0, color="k", ls="--", lw=0.75)
@@ -376,6 +386,7 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     # --- Potential temperature ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig3.csv", sort="y")
     ax = fig.add_subplot(gs[0, 0])
+    _add_subplot_label(ax, "a")
     for i, t in enumerate(t_short):
         ax.plot(*ref[t], color=colors[i], **ref_kw)
         ax.plot(ds["th"].isel(time=i) - 273.15, ds["z"], color=colors[i], label=t)
@@ -386,6 +397,7 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     # --- Sensible heat flux ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig4.csv", sort="y")
     ax = fig.add_subplot(gs[0, 1], sharey=ax)
+    _add_subplot_label(ax, "b")
     for i in range(1, 5):
         x, y = ref[t_short[i]]
         ax.plot(x / 100, y, color=colors[i], **ref_kw)
@@ -397,6 +409,7 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     # --- Water vapor ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig8.csv", sort="y")
     ax = fig.add_subplot(gs[0, 2], sharey=ax)
+    _add_subplot_label(ax, "c")
     for i, t in enumerate(t_short):
         ax.plot(*ref[t], color=colors[i], **ref_kw)
         ax.plot(ds["qv"].isel(time=i) * 1000, ds["z"], color=colors[i], label=t)
@@ -407,6 +420,7 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     # --- Moisture flux ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig9.csv", sort="y")
     ax = fig.add_subplot(gs[0, 3], sharey=ax)
+    _add_subplot_label(ax, "d")
     for i in range(1, 5):
         x, y = ref[t_short[i]]
         ax.plot(x / 1e2, y, color=colors[i], **ref_kw)
@@ -418,6 +432,7 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     # --- TKE ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig5.csv", sort="y")
     ax = fig.add_subplot(gs[0, 4], sharey=ax)
+    _add_subplot_label(ax, "e")
     for i in range(1, 5):
         ax.plot(*ref[t_short[i]], color=colors[i], **ref_kw)
         ax.plot(ds["qke"].isel(time=i) / 2, ds["z"], color=colors[i], label=t_short[i])
@@ -427,6 +442,7 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     # --- Length scale ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig7.csv", sort="y")
     ax = fig.add_subplot(gs[0, 5], sharey=ax)
+    _add_subplot_label(ax, "f")
     for i in range(1, 5):
         ax.plot(*ref[t_short[i]], color=colors[i], **ref_kw)
         ax.plot(ds["L"].isel(time=i), ds["zh"], color=colors[i], label=t_short[i])
@@ -444,6 +460,7 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     # --- TKE budget at 14:00 ---
     ref = _read_ref_csv(sps.ref_dir / "nn09_fig6.csv", sort="y")
     ax = fig.add_subplot(gs_sub[0, 0])
+    _add_subplot_label(ax, "g")
     ax.plot(*ref["S"], color="C0", **ref_kw)
     ax.plot(*ref["B"], color="C1", **ref_kw)
     ax.plot(*ref["T+P"], color="C2", **ref_kw)
@@ -454,7 +471,7 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
         ds_tke_budget["div_w_tke"].values,
         ds["z"].values,
         color="C2",
-        label=r"$\langle w q^2 \rangle / 2$ div.",
+        label=r"div.~$\langle w q^2 \rangle / 2$",
     )
     ax.plot(-ds_tke_budget["tke_eps"].values, ds["z"], color="C3", label=r"$-\epsilon$")
     ax.set_xlim(-1, 1)
@@ -475,16 +492,19 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     c = np.linspace(0, 1, len(df))
 
     ax = fig.add_subplot(gs_sub[0, 1])
+    _add_subplot_label(ax, "h")
     ax.scatter(df["neg_R"], -ds_pp["R"][1:], c=c, s=10)
     ax.set_aspect("equal")
     _annotate_scatter(ax, "$-R$")
 
     ax = fig.add_subplot(gs_sub[0, 2])
+    _add_subplot_label(ax, "i")
     ax.scatter(df["zi"], ds_pp["zi"][1:], c=c, s=10)
     ax.set_aspect("equal")
     _annotate_scatter(ax, "$z_i$, m")
 
     ax = fig.add_subplot(gs_sub[0, 3])
+    _add_subplot_label(ax, "j")
     ax.scatter(df["w_st"], ds_pp["w_st"][1:], c=c, s=10)
     ax.set_aspect("equal")
     _annotate_scatter(ax, rf"$w_*$, {UNITS['u_st']}")
@@ -508,6 +528,7 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
 
     # --- Profiles at 9 h ---
     ax_m = fig.add_subplot(gs[0, 0])
+    _add_subplot_label(ax_m, "a")
     _plot_ref(ax_m, sps.ref_dir / "fig03_m.csv", sort="y")
     ax_m.plot(ds_pp["m"].isel(time=-1), ds["z"], **JAX_SCM_KW)
     ax_m.set_xlim(0, 11)
@@ -517,6 +538,7 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
     ax_m.set_ylabel("z, m")
 
     ax = fig.add_subplot(gs[0, 1], sharey=ax_m)
+    _add_subplot_label(ax, "b")
     _plot_ref(ax, sps.ref_dir / "fig03_th.csv", sort="y")
     ax.plot(ds["th"].isel(time=-1), ds["z"], **JAX_SCM_KW)
     ax.set_xlim(262.5, 268)
@@ -524,6 +546,7 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
     _yticks_only(ax)
 
     ax = fig.add_subplot(gs[0, 2], sharey=ax_m)
+    _add_subplot_label(ax, "c")
     _plot_ref(ax, sps.ref_dir / "fig04_hfx.csv", sort="y")
     ax.plot(ds["w_th"].isel(time=-1), ds["zh"], **JAX_SCM_KW)
     ax.set_xlim(-0.02, 0)
@@ -531,6 +554,7 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
     _yticks_only(ax)
 
     ax = fig.add_subplot(gs[0, 3], sharey=ax_m)
+    _add_subplot_label(ax, "d")
     _plot_ref(ax, sps.ref_dir / "fig04_momentum.csv", sort="y")
     ax.plot(ds_pp["tau"].isel(time=-1), ds["zh"], **JAX_SCM_KW)
     ax.set_xlim(0, 0.15)
@@ -538,6 +562,7 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
     _yticks_only(ax)
 
     ax = fig.add_subplot(gs[0, 4], sharey=ax_m)
+    _add_subplot_label(ax, "e")
     _plot_ref(ax, sps.ref_dir / "fig06_Km.csv", sort="y")
     ax.plot(ds["Km"].isel(time=-1), ds["zh"], **JAX_SCM_KW)
     ax.set_xlim(0, 6)
@@ -545,6 +570,7 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
     _yticks_only(ax)
 
     ax = fig.add_subplot(gs[0, 5], sharey=ax_m)
+    _add_subplot_label(ax, "f")
     _plot_ref(ax, sps.ref_dir / "fig06_Kh.csv", sort="y")
     ax.plot(ds["Kh"].isel(time=-1), ds["zh"], **JAX_SCM_KW)
     ax.set_xlim(0, 6)
@@ -555,6 +581,7 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
     gs_sub = gs[1, :].subgridspec(nrows=1, ncols=2, width_ratios=(1, 1))
 
     ax = fig.add_subplot(gs_sub[0, 0])
+    _add_subplot_label(ax, "g", dx=-0.015)
     _plot_ref(ax, sps.ref_dir / "fig02_blh.csv", sort="x")
     ax.plot(t_min, ds_pp["blh"], **JAX_SCM_KW)
     ax.set_xlim(0, 540)
@@ -563,6 +590,7 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
     ax.set_ylabel("BLH, m")
 
     ax = fig.add_subplot(gs_sub[0, 1])
+    _add_subplot_label(ax, "h", dx=-0.015)
     _plot_ref(ax, sps.ref_dir / "fig02_ust.csv", sort="x")
     ax.plot(t_min, ds["mo_u_st"], **JAX_SCM_KW)
     ax.set_xlim(0, 540)
