@@ -37,19 +37,13 @@ plt.rcParams.update(
 
 FIG_WIDTH = 7  # Full-page width for figure. Use as base.
 
-COLORS = {
-    "u": "C0",
-    "v": "C1",
-    "th": "C2",
-    "qv": "C3",
-    "qke": "C4",
-}
-REF_KW = {"color": "lightgrey", "linewidth": 1.0}
+REF_KW = {"color": "lightgrey"}
 JAX_SCM_KW = {"color": "C1", "linewidth": 1.5}
 
 LABELS_PRETTY = {
     # Mean
     "u": "$U$",
+    "ug": "$U_g$",
     "v": "$V$",
     "m": r"$M$",
     "th": r"$\Theta$",
@@ -67,19 +61,19 @@ LABELS_PRETTY = {
     "L": "$L_M$",
 }
 UNITS = {
-    "u": "m s$^{-1}$",
-    "v": "m s$^{-1}$",
+    "u": "m/s",
+    "v": "m/s",
     "th": "K",
     "thC": r"$^{\circ}$C",
-    "qv": "g kg$^{-1}$",  # ATTENTION! Native unit: kg/kg
-    "qke": "m$^2$ s$^{-2}$",
+    "qv": "g/kg",  # ATTENTION! Native unit: kg/kg
+    "qke": "m$^2$/s$^2$",
     "th_s": "K",
-    "w_th": "K m s$^{-1}$",
-    "w_qv": "g kg$^{-1}$ m s$^{-1}$",  # ATTENTION! Native unit: kg/kg m/s
-    "u_w": "m$^2$ s$^{-2}$",
-    "v_w": "m$^2$ s$^{-2}$",
-    "u_st": "m s$^{-1}$",
-    "K_m": "m$^2$ s$^{-1}$",
+    "w_th": "K m/s",
+    "w_qv": "(g/kg) (m/s)",  # ATTENTION! Native unit: kg/kg m/s
+    "u_w": "m$^2$/s$^2$",
+    "v_w": "m$^2$/s$^2$",
+    "u_st": "m/s",
+    "K_m": "m$^2$/s",
 }
 
 FIG_ROOT = pathlib.Path("figures")
@@ -123,15 +117,15 @@ sims = [
         short_name="A94",
         time_formatter=lambda t: f"{t * sim_a94.forcing.f_c:.0f}",
         time_n_ticks=6,
-        time_label="Time, f$^{-1}$",
+        time_label="$t f$, --",
         ref_dir=VAL_ROOT / "andren1994" / "ref",
         out_file=VAL_ROOT / "andren1994" / "out_cn.nc",
     ),
     SimPlotSpec(
         sim=sim_gab1,
         short_name="GAB1",
-        time_formatter=lambda t: f"{t / 3600:.0f}",
-        time_label="Time, h",
+        time_formatter=lambda t: f"{t / 60:.0f}",
+        time_label="$t$, min",
         time_n_ticks=10,
         ref_dir=VAL_ROOT / "gabls1" / "ref_cuxart06",
         out_file=VAL_ROOT / "gabls1" / "out_cn.nc",
@@ -182,52 +176,45 @@ def _add_subplot_label(ax: plt.Axes, l: str, dy: float = 0, dx: float = 0) -> No
     ax.text(0.025 + dx, 0.975 + dy, f"({l})", ha="left", va="top", transform=ax.transAxes)
 
 
-def plot_ic(sps: SimPlotSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
+def plot_ic(sps: SimPlotSpec, *, axes: Tuple[plt.Axes, ...], labels: Tuple[str, ...]) -> None:
     """Plot initial conditions."""
-    ic_gs = gs.subgridspec(nrows=1, ncols=4)
-    ax_uv = fig.add_subplot(ic_gs[0, 0])
-    ax_th = fig.add_subplot(ic_gs[0, 1], sharey=ax_uv)
-    ax_qv = fig.add_subplot(ic_gs[0, 2], sharey=ax_uv)
-    ax_qke = fig.add_subplot(ic_gs[0, 3], sharey=ax_uv)
+    # Unpack axes
+    ax_u_v, ax_th, ax_qv, ax_qke = axes
+    for ax, l in zip(axes, labels):
+        _add_subplot_label(ax, l)
 
     sim = sps.sim
-    ax_uv.plot(sim.init.u, sim.grid.z, label="u", color=COLORS["u"])
-    ax_uv.plot(sim.init.v, sim.grid.z, label="v", color=COLORS["v"])
-    _add_is_const(v=sim.init.u, ax=ax_uv, x=0.5)
-    ax_uv.legend()
-    ax_uv.set_xlabel(f"Wind, {UNITS['u']}")
+    ax_u_v.plot(sim.init.u, sim.grid.z, label=LABELS_PRETTY["u"], color="C0")
+    ax_u_v.plot(sim.init.v, sim.grid.z, label=LABELS_PRETTY["v"], color="C0", ls="dashed")
+    _add_is_const(v=sim.init.u, ax=ax_u_v, x=0.5, y=0.5)
+    ax_u_v.legend(fontsize=6, loc="upper center")
+    ax_u_v.set_xlabel(f"Wind, {UNITS['u']}")
+    ax_u_v.set_ylabel("$z$, m")
+    ax_u_v.set_ylim(0, sim.grid.H)
 
-    ax_th.plot(sim.init.th, sim.grid.z, label="th", color=COLORS["th"])
-    _add_is_const(v=sim.init.th, ax=ax_th, x=0.5)
+    ax_th.plot(sim.init.th, sim.grid.z, label="th", color="C0")
+    _add_is_const(v=sim.init.th, ax=ax_th, x=0.5, y=0.5)
     ax_th.set_xlabel(f"{LABELS_PRETTY['th']}, {UNITS['th']}")
+    _yticks_only(ax_th)
 
-    ax_qv.plot(sim.init.qv * 100, sim.grid.z, label="qv", color=COLORS["qv"])
-    _add_is_const(v=sim.init.qv, ax=ax_qv, x=0.5)
+    ax_qv.plot(sim.init.qv * 100, sim.grid.z, label="qv", color="C0")
+    _add_is_const(v=sim.init.qv, ax=ax_qv, x=0.5, y=0.5)
     ax_qv.set_xlim(0, None)
     ax_qv.set_xlabel(f"{LABELS_PRETTY['qv']}, {UNITS['qv']}")
+    _yticks_only(ax_qv)
 
-    ax_qke.plot(sim.init.qke, sim.grid.z, label="qke", color=COLORS["qke"])
+    ax_qke.plot(sim.init.qke, sim.grid.z, label="qke", color="C0")
     ax_qke.set_xlim(0, None)
     ax_qke.set_xlabel(f"{LABELS_PRETTY['qke']}, {UNITS['qke']}")
-
-    ax_uv.set_ylabel("Height, m")
-    ax_uv.set_ylim(0, sim.grid.H)
-
-    for ax in (ax_th, ax_qv, ax_qke):
-        ax.tick_params(axis="y", which="both", left=False, labelleft=False)
+    _yticks_only(ax_qke)
 
 
-def plot_bc(sps: SimPlotSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
+def plot_bc(sps: SimPlotSpec, *, fig: plt.Figure, axes: Tuple[plt.Axes, ...], labels: Tuple[str, ...]) -> None:
     """Plot boundary conditions (i.e. time-varying forcing)."""
-    row_gs = gs.subgridspec(
-        nrows=2,
-        ncols=2,
-        width_ratios=(1, 3),
-        height_ratios=(1, 1),
-    )
-    ax_ug = fig.add_subplot(row_gs[:, 0])
-    ax_heat = fig.add_subplot(row_gs[0, 1])
-    ax_w_qv = fig.add_subplot(row_gs[1, 1], sharex=ax_heat)
+    # Unpack axes
+    ax_ug, ax_heat, ax_w_qv = axes
+    for ax, l in zip(axes, labels):
+        _add_subplot_label(ax, l)
 
     sim = sps.sim
     t = jnp.linspace(sim.t_start_s, sim.t_end_s)
@@ -237,13 +224,13 @@ def plot_bc(sps: SimPlotSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
     # Geostrophic forcing
     ug = jax.vmap(sim.forcing.u_geo)(t)
     pc = ax_ug.pcolormesh(t, sim.grid.z, ug.T, shading="auto", cmap="Blues", rasterized=True)
-    _add_is_const(v=ug, ax=ax_ug, x=0.5, color="white")
+    _add_is_const(v=ug, ax=ax_ug, x=0.5, y=0.5, color="white")
     ax_ug.set_xticks(t_ticks_ug)
     ax_ug.set_xticklabels([sps.time_formatter(tick) for tick in t_ticks_ug])
     ax_ug.set_xlabel(sps.time_label)
-    ax_ug.set_ylabel("Height, m")
-    ax_ug.set_ylim(0, sim.grid.H)
-    fig.colorbar(pc, ax=ax_ug, label="$U_g$, m s$^{-1}$", pad=0.01)
+    _yticks_only(ax_ug)
+    cb = fig.colorbar(pc, ax=ax_ug, pad=0.01, shrink=0.65)
+    cb.ax.set_title(f"{LABELS_PRETTY['ug']},\n{UNITS['u']}", loc="left", fontsize=7)
 
     # Heat forcing
     if sim.forcing.w_th_s is None:
@@ -251,21 +238,22 @@ def plot_bc(sps: SimPlotSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
         heat = jax.vmap(sim.forcing.th_s)(t)
         label = LABELS_PRETTY["th_s"]
         unit = UNITS["th_s"]
+        color = "C3"
     else:
         # Sensible heat flux forcing
         heat = jax.vmap(sim.forcing.w_th_s)(t)
         label = LABELS_PRETTY["w_th"]
         unit = UNITS["w_th"]
+        color = "C6"
 
-    ax_heat.plot(t, heat, color=COLORS["th"])
-    ax_heat.set_ylabel(f"{label},\n{unit}")
-    ax_heat.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
-    ax_heat.margins(x=0)
+    ax_heat.plot(t, heat, color=color)
+    ax_heat.set_ylabel(f"{label}, {unit}")
+    _xticks_only(ax_heat)
     _add_is_const(v=heat, ax=ax_heat)
 
     # Moisture forcing
     w_qv = jax.vmap(sim.forcing.w_qv_s)(t) * 1e3
-    ax_w_qv.plot(t, w_qv, label="w_qv", color=COLORS["qv"])
+    ax_w_qv.plot(t, w_qv, color="C0")
     _add_is_const(v=w_qv, ax=ax_w_qv)
 
     ax_w_qv.margins(x=0)
@@ -278,11 +266,21 @@ def plot_bc(sps: SimPlotSpec, fig: plt.Figure, gs: plt.SubplotSpec) -> None:
 
 def plot_ic_bc(sps: SimPlotSpec) -> plt.Figure:
     """Plot initial conditions and boundary conditions for a given simulation."""
-    fig = plt.figure(constrained_layout=True, figsize=(4, 3))
-    outer_gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=(1, 1))
+    fig = plt.figure(constrained_layout=True, figsize=(FIG_WIDTH, 2))
+    gs = fig.add_gridspec(nrows=1, ncols=6, width_ratios=(1, 1, 1, 1, 1, 3))
+    gs_ts = gs[0, -1].subgridspec(nrows=2, ncols=1)
 
-    plot_ic(sps, fig, outer_gs[0])
-    plot_bc(sps, fig, outer_gs[1])
+    ax_u_v = fig.add_subplot(gs[0, 0])
+    ax_th = fig.add_subplot(gs[0, 1], sharey=ax_u_v)
+    ax_qv = fig.add_subplot(gs[0, 2], sharey=ax_u_v)
+    ax_qke = fig.add_subplot(gs[0, 3], sharey=ax_u_v)
+    ax_ug = fig.add_subplot(gs[0, 4], sharey=ax_u_v)
+
+    ax_heat = fig.add_subplot(gs_ts[0, 0])
+    ax_w_qv = fig.add_subplot(gs_ts[1, 0], sharex=ax_heat)
+
+    plot_ic(sps, axes=(ax_u_v, ax_th, ax_qv, ax_qke), labels=("a", "b", "c", "d"))
+    plot_bc(sps, fig=fig, axes=(ax_ug, ax_heat, ax_w_qv), labels=("e", "f", "g"))
 
     return fig
 
@@ -608,10 +606,18 @@ def plot_gabls1_res(sps: SimPlotSpec) -> plt.Figure:
 
 
 if __name__ == "__main__":
-    # for sim in sims:
-    #     fig_ic_bc = plot_ic_bc(sim)
-    #     fig_ic_bc.savefig(FIG_ROOT / f"ic_bc_{sim.short_name}.pdf")
-    #
+    FIG_ROOT.mkdir(parents=True, exist_ok=True)
+    for sim in sims:
+        fig_ic_bc = plot_ic_bc(sim)
+        # Use bbox_inches='tight' and pad_inches=0 to remove extra padding around the
+        # figure when exporting to PDF. Some PDF viewers still show a hairline margin,
+        # but this produces the smallest possible white border from Matplotlib.
+        fig_ic_bc.savefig(
+            FIG_ROOT / f"ic_bc_{sim.short_name}.pdf",
+            bbox_inches="tight",
+            pad_inches=0.0,
+        )
+
     sps_a94, sps_gab1, sps_wg33 = sims
 
     fig_a94 = plot_a94_res(sps_a94)
