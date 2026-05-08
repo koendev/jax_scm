@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import pytest
 
-from scm.config import AdaptiveTimestepConfig, Namelist, TimeIntMethod
+from scm.config import AdaptiveTimestepConfig, Namelist, TimeIntMethod, LogLevel
 from scm.examples.gabls1 import get_gabls1
 from scm.mynn.model import init_model
 from scm.time_stepping import simulate
@@ -34,6 +34,9 @@ CONFIGS = [
 
 @pytest.mark.parametrize("cfg", CONFIGS)
 def test_time_stepping_configs(cfg):
+    # Set logging to silent
+    cfg.logging.level = LogLevel.SILENT
+
     # Setup short simulation (3h to make it over the initial Km build up)
     sim = get_gabls1()
     sim.t_end_s = 3 * 60 * 60  # 3 hours
