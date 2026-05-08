@@ -499,7 +499,7 @@ def plot_wg33_res(sps: SimPlotSpec) -> plt.Figure:
     ax.plot(ds_tke_budget["tke_P_S"].values, ds["z"], color="C0", label="$P_S$")
     ax.plot(ds_tke_budget["tke_P_B"].values, ds["z"], color="C1", label="$P_B$")
     ax.plot(
-        ds_tke_budget["div_w_tke"].values,
+        -ds_tke_budget["div_w_tke"].values,
         ds["z"].values,
         color="C2",
         label=r"div.~$\langle w q^2 \rangle / 2$",
