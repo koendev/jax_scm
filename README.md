@@ -1,63 +1,179 @@
-# JAX-SCM: Technical Description
+# JAX-SCM
 
-JAX-SCM is a high-performance single-column model (SCM) implemented in JAX, designed for atmospheric boundary layer research. It leverages JIT compilation, automatic differentiation, and hardware acceleration (GPU/TPU) to provide a modern framework for boundary layer modeling.
+JAX-SCM is a modern single-column model (SCM) for atmospheric boundary layer simulation, implemented
+in [JAX](https://github.com/jax-ml/jax). It implements the MYNN 2.5 turbulence closure with Monin-Obukhov surface layer
+coupling, and is designed for research use.
 
 ![coverage](docs/coverage-badge.svg)
 ![tests](docs/test-badge.svg)
+
+## Installation
+
+This project uses [`uv`](https://docs.astral.sh/uv/) for package management. Install it first if you don't have it.
+Then clone the repository and install in editable mode:
+
+```bash
+git clone <repo-url>
+cd jax-scm
+uv sync
+```
+
+On Linux, JAX with CUDA support is installed automatically. On macOS, the CPU build is used.
+
+Verify the installation:
+
+```bash
+uv run python -c "import scm; print('OK')"
+```
+
+## Quick Start
+
+All simulation parameters (initial conditions, forcing, time stepping, ...) are controlled by the `Simulation`
+object. See examples in [`scm.examples`](src/scm/examples). Once the `Simulation` is built, initialize a `Model` and
+run the time-stepping loop with `simulate()`. The output is a dictionary of arrays, which can be converted to an
+`xarray.Dataset` for analysis and export.
+
+```python
+import jax
+from scm.config import Namelist, TimeIntMethod
+from scm.examples.gabls1 import get_gabls1
+from scm.io.local import out_to_ds
+from scm.mynn.model import init_model
+from scm.time_stepping import simulate
+
+sim = get_gabls1(Nz=64)  # build Simulation object
+cfg = Namelist(time_int=TimeIntMethod.IMPLICIT)  # choose time integration
+model = init_model(sim, cfg=cfg)
+out = simulate(model=model, sim=sim, cfg=cfg)
+
+ds = out_to_ds(out=out, sim=sim)  # convert to xarray Dataset
+ds.to_netcdf("out.nc")
+```
+
+### The `Simulation` object
+
+`Simulation` is a frozen dataclass that fully specifies a model run. Build one directly or use a pre-built example from
+`scm.examples`:
+
+| Field         | Type                 | Description                                                               |
+|---------------|----------------------|---------------------------------------------------------------------------|
+| `name`        | `str`                | Identifier for this run                                                   |
+| `grid`        | `StaggeredGrid`      | Vertical grid (Nz, dz)                                                    |
+| `mo_settings` | `MOSettings`         | Monin-Obukhov solver settings (z0, stability functions)                   |
+| `init`        | `ProgVarsMYNN`       | Initial profiles of u, v, θ, q_v, qke                                     |
+| `forcing`     | `Forcing`            | Time-dependent boundary conditions and large-scale tendencies (see below) |
+| `th_ref`      | `float`              | Reference potential temperature for buoyancy terms (K)                    |
+| `t_start_s`   | `int`                | Simulation start time (seconds)                                           |
+| `t_end_s`     | `int`                | Simulation end time (seconds)                                             |
+| `t_index_fn`  | `Callable` or `None` | Optional mapping from seconds to, e.g., hours forr xarray output          |
+
+**`Forcing`** specifies all time-varying boundary conditions and external tendencies. Every `ForceSingleFn` is a
+callable `f(t_s) → scalar or (Nz,) array`:
+
+| Field            | Type                      | Description                                                                                                          |
+|------------------|---------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `u_geo`, `v_geo` | `ForceSingleFn`           | Geostrophic wind profiles, must return `(Nz,)`                                                                       |
+| `f_c`            | `float`                   | Coriolis parameter (1/s)                                                                                             |
+| `w_th_s`         | `ForceSingleFn` or `None` | Surface sensible heat flux (K m/s); mutually exclusive with `th_s`                                                   |
+| `th_s`           | `ForceSingleFn` or `None` | Prescribed skin temperature (K); mutually exclusive with `w_th_s`                                                    |
+| `w_qv_s`         | `ForceSingleFn`           | Surface moisture flux (kg/kg m/s)                                                                                    |
+| `dth_dz_top`     | `float`                   | Potential temperature lapse rate at the upper boundary (K/m)                                                         |
+| `ls_tends`       | `ForceTendsFn` or `None`  | Large-scale advective tendencies and subsidence; signature `(t_s, state, grads, diag) → ProgVarsMYNN`  (unvalidated) | 
+
+### Namelist configuration
+
+The `Namelist` controls time integration and output. The two most common configurations, also used by the validation
+cases, are:
+
+**Crank-Nicolson (semi-implicit, recommended):**
+
+```yaml
+# namelist_cn.yaml
+time_int: "implicit"
+dt_s: 1.0
+dt_s_out: 300.0
+logging:
+  log_every_n: 10
+```
+
+**Adams-Bashforth 2 (explicit with adaptive timestep):**
+
+```yaml
+# namelist_ab2.yaml
+time_int: "explicit"
+adaptive_timestep:
+  cfl_max: 0.025
+  dt_s_max: 10.0
+dt_s: 0.01
+logging:
+  log_every_n: 10
+```
+
+Load a namelist from YAML:
+
+```python
+from scm.config import load_namelist
+
+cfg = load_namelist("namelist_cn.yaml")
+```
+
+## Running Validation Cases
+
+Pre-built validation cases are located in `validation/`. Each case has its own `run.py` and two namelists (CN and AB2).
+Run them from inside their directory:
+
+```bash
+cd validation/gabls1
+uv run python run.py
+```
+
+This writes `out_cn.nc`, `out_ab2.nc`, and HTML diagnostic reports to the same directory.
+
+### Available validation cases
+
+| Case           | Directory                | Description                                              | Reference                |
+|----------------|--------------------------|----------------------------------------------------------|--------------------------|
+| GABLS1         | `validation/gabls1/`     | Stable boundary layer, 9-hour surface cooling, Nz=64     | Cuxart et al. (2006)     |
+| Andren 1994    | `validation/andren1994/` | Neutral boundary layer with geostrophic forcing, Nz=100  | Andren et al. (1994)     |
+| Wangara Day 33 | `validation/wangara/`    | Convective boundary layer from observed profiles, Nz=100 | Nakanishi & Niino (2009) |
 
 ## Numerical and Physical Features
 
 ### Time Integration
 
-- **Integration Schemes**: Supports multiple time-stepping strategies:
-  - **Explicit**: 2nd-order Adams-Bashforth (AB2) with an initial Euler warmup step.
-    - **Adaptive Time Stepping**: Optional CFL-based adaptive $\Delta t$ for explicit diffusion, ensuring numerical stability while maximizing computational efficiency.
-  - **Semi-Implicit**: Crank-Nicolson (CN) scheme for vertical diffusion, coupled with AB2 for explicit source terms (Coriolis, large-scale advection, TKE production/dissipation). Tridiagonal matrix solver used for matrix inversion.
+- **Explicit**: 2nd-order Adams-Bashforth (AB2) with an Euler warmup step. Optional CFL-based adaptive $\Delta t$ for
+  explicit diffusion.
+- **Semi-Implicit**: Crank-Nicolson (CN) for vertical diffusion, combined with AB2 for explicit source terms (Coriolis,
+  large-scale advection, TKE production/dissipation). Tridiagonal matrix solver used for the implicit step.
 
 ### Spatial Discretization
 
-- **Vertical Grid**: staggered vertical grid 
-  - prognostic state variables are located at cell centers (full levels)
-  - turbulent fluxes/diffusivities are located at cell faces (half levels)
-- **Finite Differences**: First-order finite difference approximations for vertical gradient operators.
+Staggered vertical grid:
 
-### Turbulence Closure
+- **Full levels** (cell centers, `z = dz * (0.5, 1.5, ...)`): prognostic state variables (u, v, θ, q_v, qke)
+- **Half levels** (cell faces, `zh = dz * (0, 1, ...)`): turbulent fluxes and diffusivities
 
-- **MYNN Level-2.5**: Implements the improved Mellor-Yamada-Nakanishi-Niino (2009) closure scheme.
-- **Prognostic Variables**:
-  - Horizontal wind components ($u, v$).
-  - Potential temperature ($\theta$).
-  - Specific humidity ($q_v$).
-  - Twice the turbulent kinetic energy ($q^2$ or $qke$).
-- **Length Scale Formulation**: A master length scale derived from the harmonic mean of surface-limited ($L_S$), turbulent ($L_T$), and buoyancy-limited ($L_B$) scales.
-- **Stability Functions**: Level-2.5 stability functions for momentum ($S_M$), heat ($S_H$), and TKE ($S_q$).
+First-order finite differences for vertical gradient operators.
 
-### Surface Layer and Coupling
+### Turbulence Closure — MYNN 2.5
 
-- **Monin-Obukhov Similarity Theory (MOST)**: Surface boundary conditions derived via MOST.
-- **Similarity Functions**: Support for standard Businger-Dyer relationships with configurable stability parameters.
-- **Iterative Solution**: Robust iterative solver for the stability parameter $\zeta = z/L$ to couple the surface with the lowest model level.
-- **Flexible Boundary Conditions**: Support for both prescribed surface temperature (skin temperature) and prescribed sensible/latent heat fluxes.
+Implements the Mellor-Yamada-Nakanishi-Niino Level-2.5 closure:
 
-### Forcing and Data Integration
+- **Prognostic variables**: u, v, θ, q_v, qke (where qke = q² = 2×TKE)
+- **Master length scale**: harmonic mean of surface-limited ($L_S$), turbulent ($L_T$), and buoyancy-limited ($L_B$)
+  scales
+- A 1-2-1 filter is applied to length scales and diffusivities to suppress vertical numerical oscillations
 
-- **Dynamic Forcing**: Time-dependent geostrophic wind profiles and Coriolis forcing.
-- **Large-Scale Tendencies**: Inclusion of horizontal advective tendencies and vertical subsidence $(-w_{ls} \frac{\partial \phi}{\partial z})$ for scalars and momentum.
-- **Data Interfaces**: Automated pipelines for ERA5 reanalysis integration, including vertical interpolation and geostrophic wind calculation from geopotential fields.
+### Surface Layer
 
-### Implementation Framework
+Monin-Obukhov Similarity Theory (MOST) with iterative solver for the stability parameter $\zeta = z/L$. Supports:
 
-- **JAX-Native**: Fully differentiable and vectorized implementation.
-- **Metadata-Rich I/O**: Xarray-based data handling with NetCDF output and integrated HTML reporting for simulation diagnostics.
+- Businger-Dyer stability functions (configurable parameters)
+- Prescribed surface temperature (skin temperature) or prescribed sensible/latent heat fluxes
+- Prescribed moisture fluxes
 
-## Ensemble and Optimization
+### Forcing
 
-- **Parameter Sweeps**: `jax.vmap` enables efficient ensemble runs over model parameters (e.g., closure constant B1) without looping — see `examples/ensemble/`.
-
-## Validation
-
-Multiple standard cases from literature are implemented to validate jax-scm:
-
-- GABLS1, stable boundary layer experiment (Cuxart et al. 2006)
-- Andren (1994), neutral boundary layer with geostrophic forcing
-- Wangara, day 33, convective boundary layer initialized with observed profiles
+- Time-dependent geostrophic wind profiles via callable
+- Coriolis forcing
+- ERA5 interfaces for realistic large-scale forcing and initial conditions (untested)
