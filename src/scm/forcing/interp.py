@@ -2,14 +2,33 @@ from __future__ import annotations
 
 from typing import Callable
 
+import jax
 import numpy as np
 import pandas as pd
 import xarray as xr
 from jax import numpy as jnp
 
 
+def _interp_1d(time_s: jnp.ndarray, data: jnp.ndarray, t_s: jnp.ndarray) -> jnp.ndarray:
+    return jnp.interp(t_s, time_s, data)
+
+
+def _interp_2d(time_s: jnp.ndarray, data: jnp.ndarray, t_s: jnp.ndarray) -> jnp.ndarray:
+    idx = jnp.arange(data.shape[0])
+    i = jnp.interp(t_s, time_s, idx)
+    i_low = jnp.floor(i).astype(int)
+    i_high = jnp.ceil(i).astype(int)
+    i = i - i_low  # fractional part
+    return data[i_low, :] + i * (data[i_high, :] - data[i_low, :])
+
+
 def get_ts_interp_fn(time_s: jnp.ndarray, data: jnp.ndarray) -> Callable[[jnp.ndarray], jnp.ndarray]:
     """Get a jitted time series interpolation function for jax.
+
+    The returned object is a :class:`jax.tree_util.Partial`, so the captured
+    ``time_s`` and ``data`` arrays are pytree leaves rather than hidden
+    closure state. This makes the function safe to use as a forcing in
+    ensembles stacked via :mod:`scm.ensemble`.
 
     Parameters
     ----------
@@ -25,25 +44,10 @@ def get_ts_interp_fn(time_s: jnp.ndarray, data: jnp.ndarray) -> Callable[[jnp.nd
         A function that takes new time points and returns interpolated data values.
 
     """
-    idx = jnp.arange(data.shape[0])
-
-    def interp_fn(t_s: jnp.ndarray) -> jnp.ndarray:
-        return jnp.interp(t_s, time_s, data)
-
-    def interp_2d_fn(t_s: jnp.ndarray) -> jnp.ndarray:
-        # Interpolate index
-        i = jnp.interp(t_s, time_s, idx)
-        i_low = jnp.floor(i).astype(int)
-        i_high = jnp.ceil(i).astype(int)
-        i = i - i_low  # fractional part
-        return data[i_low, :] + i * (data[i_high, :] - data[i_low, :])
-
     if data.ndim == 1:
-        interp_fn(time_s[0])  # warm up jitting
-        return interp_fn
+        return jax.tree_util.Partial(_interp_1d, time_s, data)
     elif data.ndim == 2:
-        interp_2d_fn(time_s[0])  # warm up jitting
-        return interp_2d_fn
+        return jax.tree_util.Partial(_interp_2d, time_s, data)
     else:
         raise ValueError("data must be 1D or 2D")
 

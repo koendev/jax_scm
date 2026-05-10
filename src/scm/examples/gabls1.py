@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import xarray as xr
@@ -6,6 +7,18 @@ from scm.grid import StaggeredGrid
 from scm.interfaces import Forcing, Simulation
 from scm.mo import BusingerDyerAltSimFuncs, MOSettings
 from scm.mynn.interfaces import ProgVarsMYNN
+
+
+def _const(value, t_s):
+    return value
+
+
+def _linear_in_time(a, b, t_s):
+    return a + b * t_s
+
+
+def _t_to_hours(t_s):
+    return t_s / 3600
 
 
 def get_gabls1(Nz: int = 64, plot: bool = False) -> Simulation:
@@ -27,16 +40,19 @@ def get_gabls1(Nz: int = 64, plot: bool = False) -> Simulation:
     ug = jnp.ones(Nz) * 8.0  # m/s
     vg = jnp.zeros(Nz)  # m/s
 
-    # Surface temperature forcing
-    th_s_0 = 265  # K
-    th_s_fn = lambda t_s: th_s_0 - 0.25 * t_s / (60 * 60)  # K, 0.25 K per hour cooling
+    # Surface temperature forcing: 0.25 K per hour cooling.
+    # Use jax.tree_util.Partial so captured arrays remain pytree leaves and
+    # this Forcing can be stacked across ensemble members (see scm.ensemble).
+    th_s_0 = jnp.array(265.0)  # K
+    th_s_rate = jnp.array(-0.25 / 3600.0)  # K/s
+    th_s_fn = jax.tree_util.Partial(_linear_in_time, th_s_0, th_s_rate)
 
     # No moisture
-    w_qv_s = lambda t_s: jnp.array(0.0)  # g/kg m/s
+    w_qv_s = jax.tree_util.Partial(_const, jnp.array(0.0))  # kg/kg m/s
 
     forcing = Forcing(
-        u_geo=lambda t_s: ug,
-        v_geo=lambda t_s: vg,
+        u_geo=jax.tree_util.Partial(_const, ug),
+        v_geo=jax.tree_util.Partial(_const, vg),
         f_c=1.39e-4,  # 1/s, ~73 deg latitude
         th_s=th_s_fn,
         w_qv_s=w_qv_s,
@@ -106,7 +122,7 @@ def get_gabls1(Nz: int = 64, plot: bool = False) -> Simulation:
         t_start_s=0,
         t_end_s=9 * 60 * 60,
         th_ref=263.5,  # midpoint of surface cooling range, following microhh GABLS1 case
-        t_index_fn=lambda t_s: t_s / 3600,  # hours
+        t_index_fn=jax.tree_util.Partial(_t_to_hours),  # hours
     )
 
 

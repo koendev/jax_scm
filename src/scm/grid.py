@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class StaggeredGrid:
     """Staggered vertical grid with cell centers and faces."""
 

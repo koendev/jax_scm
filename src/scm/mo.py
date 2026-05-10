@@ -17,9 +17,14 @@ logger = logging.getLogger("scm.mo")
 SimFuncType = Callable[[jnp.ndarray], jnp.ndarray]
 
 
-@dataclasses.dataclass(kw_only=True)
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class MOSettings:
-    """Settings for MO atmosphere surface coupling."""
+    """Settings for MO atmosphere surface coupling.
+
+    Registered as a JAX pytree, so ``z0m``/``z0h`` and the parameters of
+    ``sim_funcs`` can vary across ensemble members.
+    """
 
     z0m: float = meta_field("Momentum roughness length", units="m", level="surface")
     z0h: float = meta_field("Heat roughness length", units="m", level="surface")
@@ -42,6 +47,8 @@ class MOSettings:
     @classmethod
     def deserialize(cls, mo_str: str) -> Self:
         data = yaml.yaml_to_dict(mo_str)
+        if "sim_funcs" in data and isinstance(data["sim_funcs"], dict):
+            data["sim_funcs"] = BusingerDyerSimFuncs(**data["sim_funcs"])
         return cls(**data)
 
 
@@ -103,8 +110,14 @@ class MOSimilarityFuncs(abc.ABC):
         return self.get_phi_m_fn(), self.get_phi_h_fn(), self.get_psi_m_fn(), self.get_psi_h_fn()
 
 
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass(frozen=True)
 class BusingerDyerSimFuncs(MOSimilarityFuncs):
     """Businger-Dyer flux-gradient relationships.
+
+    Registered as a JAX pytree so its parameters (``gamma_m``, ``gamma_h``,
+    ``b_m``, ``b_h``) are visible to ``vmap``/``pmap``/``grad`` and can vary
+    across ensemble members.
 
     References
     ----------
@@ -112,11 +125,15 @@ class BusingerDyerSimFuncs(MOSimilarityFuncs):
     - Paulson 1970
     """
 
-    def __init__(self, gamma: float = 16, b: float = 5):
-        self.gamma_m = gamma
-        self.gamma_h = gamma
-        self.b_m = b
-        self.b_h = b
+    gamma_m: float = 16.0
+    gamma_h: float = 16.0
+    b_m: float = 5.0
+    b_h: float = 5.0
+
+    @classmethod
+    def unified(cls, gamma: float = 16.0, b: float = 5.0) -> "BusingerDyerSimFuncs":
+        """Construct with a single gamma/b shared between momentum and heat."""
+        return cls(gamma_m=gamma, gamma_h=gamma, b_m=b, b_h=b)
 
     def get_phi_m_fn(self) -> SimFuncType:
         """Similarity function for momentum
@@ -207,14 +224,9 @@ class BusingerDyerSimFuncs(MOSimilarityFuncs):
         return _psi_h
 
 
-class BusingerDyerAltSimFuncs(BusingerDyerSimFuncs):
-    """Alternative formulation allowing separate gamma and b for momentum and heat"""
-
-    def __init__(self, gamma_m: float = 16, gamma_h: float = 16, b_m: float = 5, b_h: float = 5):
-        self.gamma_m = gamma_m
-        self.gamma_h = gamma_h
-        self.b_m = b_m
-        self.b_h = b_h
+# Backward-compat alias: separate momentum/heat parameters are now first-class
+# fields on ``BusingerDyerSimFuncs``.
+BusingerDyerAltSimFuncs = BusingerDyerSimFuncs
 
 
 def get_L_obukhov(u_st: jnp.ndarray, w_thv: jnp.ndarray, thv: jnp.ndarray) -> jnp.ndarray:
