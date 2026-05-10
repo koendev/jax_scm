@@ -145,11 +145,22 @@ class Output:
     t_s: jnp.ndarray
 
     def __len__(self) -> int:
+        # If time dim is removed, no length
+        if self.t_s.ndim == 0:
+            return 0
         return len(self.t_s)
 
     def __getitem__(self, item) -> Output:
         """Subset output"""
         return jax.tree_util.tree_map(lambda x: x[item], self)
+
+    def __iter__(self):
+        """Iterate over time steps, yielding Output objects for each time step."""
+        if len(self) == 0:
+            raise ValueError("Output has no time dimension to iterate over.")
+
+        for i in range(len(self)):
+            yield self[i]
 
 
 class ModelFn(Protocol[ParamsT]):

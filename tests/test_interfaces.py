@@ -128,12 +128,16 @@ class TestOutput:
         dims_ = jax.tree.map(lambda x: x.ndim, out_)
         assert dims == dims_
 
+        # Length should be zero as time dimension is removed
+        assert len(out_) == 0
+
         # Compare
         comp = jax.tree.map(lambda x, x_: jnp.allclose(x[i], x_), out, out_)
         comp, _ = jax.tree.flatten(comp)
         assert jnp.all(jnp.array(comp))
 
     def test_slicing(self, out: Output):
+        """Select subset using slicing"""
         out_ = out[:100]  # first 100 steps
         assert len(out_) == 100
 
@@ -141,7 +145,17 @@ class TestOutput:
         assert len(out__) == 20
 
     def test_masking(self, out: Output):
+        """Select subset using mask"""
         mask = numpy.random.uniform(size=len(out))
         mask = mask < 0.5
         out_ = out[mask]
         assert len(out_) == mask.sum()
+
+    def test_iter(self, out: Output):
+        """Iterate over output. Should return each time step as 1D Output"""
+        out = out[:10]  # first 10 steps for testing
+
+        for i, out_ in enumerate(out):
+            # Test that correct type returned. Rest tested by `test_single`
+            assert isinstance(out_, Output)
+            assert len(out_) == 0
