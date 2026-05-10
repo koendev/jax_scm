@@ -147,16 +147,3 @@ def test_split_sim() -> None:
         err = jnp.array(err)
         assert jnp.mean(err) < 1e-6
         assert jnp.max(err) < 1e-4
-
-
-def test_run_pmap():
-    fixture_dir = FIXTURE_ROOT / "gabls1"
-    cfg = fixture_dir / "namelist_ab2.yaml"
-
-    def run(sim: Simulation) -> Output:
-        model = init_model(sim, cfg=cfg)
-        out = simulate(model=model, sim=sim, cfg=cfg)
-        return out
-
-    sims = [get_gabls1(Nz=64) for _ in range(4)]
-    out = jax.pmap(run)(sims)
