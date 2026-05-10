@@ -1,6 +1,14 @@
+import dataclasses
+
+import jax
+import numpy as np
+import pytest
+import xarray as xr
+
 from scm.config import Namelist, TimeIntMethod
 from scm.examples import get_gabls1
-from scm.io.local import out_to_ds
+from scm.io.local import ds_to_dataclass, out_to_ds
+from scm.mynn.interfaces import ProgVarsMYNN
 from scm.mynn.io import sim_from_ds
 from scm.mynn.model import init_model
 from scm.time_stepping import simulate
@@ -77,3 +85,36 @@ def test_to_nc(tmpdir):
     # Convert to dataset and save to netcdf
     ds = out_to_ds(out=out, sim=sim)
     ds.to_netcdf(tmpdir / "test.nc")
+
+
+@pytest.mark.parametrize("with_prefix", [False, True])
+def test_ds_to_state(with_prefix: bool):
+    """Test conversion of xarray dataset to dataclass"""
+    # Random state
+    Nt, Nz = 100, 64
+    fields = dataclasses.fields(ProgVarsMYNN)
+    data = {
+        f.name: (
+            ("time", "z"),
+            np.random.random((Nt, Nz)),
+        )
+        for f in fields
+    }
+
+    # Test that prefix gets removed correctly
+    if with_prefix:
+        data = {"mo_" + f: v for (f, v) in data.items()}
+
+    ds = xr.Dataset(data)
+
+    if with_prefix:
+        # Prefix should be removed, ie mo_u and u match
+        state = ds_to_dataclass(ds, cls=ProgVarsMYNN, prefix="mo")
+        assert np.allclose(state.u, ds["mo_u"])
+    else:
+        # Standard test
+        state = ds_to_dataclass(ds, cls=ProgVarsMYNN)
+        assert np.allclose(state.u, ds["u"])
+
+    assert isinstance(state, ProgVarsMYNN)
+    assert isinstance(state.u, jax.Array)

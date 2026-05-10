@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Type, TypeVar
 
 import pandas as pd
 import xarray as xr
@@ -8,6 +9,8 @@ from jax import numpy as jnp
 
 from scm.forcing.utils import sample_forcing
 from scm.interfaces import Output, Simulation
+
+T = TypeVar("T")
 
 
 def out_to_ds(
@@ -110,3 +113,18 @@ def out_to_ds(
         print(f"Warning: Could not serialize MO settings for output dataset. Error: {e}")
 
     return ds
+
+
+def ds_to_dataclass(ds: xr.Dataset, cls: Type[T], prefix: str = "") -> T:
+    """Select matching fields of `cls` dataclass from `ds` and return as instance"""
+    # append underscore to prefix
+    if prefix and (prefix[-1] != "_"):
+        prefix = f"{prefix}_"
+
+    # Select fieldnames from dataclass
+    fields = dataclasses.fields(cls)
+    field_names = [f.name for f in fields]
+
+    # Select data and convert to jax
+    data = {f: jnp.array(ds[f"{prefix}{f}"].values) for f in field_names}
+    return cls(**data)
