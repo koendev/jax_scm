@@ -26,9 +26,7 @@ def get_ts_interp_fn(time_s: jnp.ndarray, data: jnp.ndarray) -> Callable[[jnp.nd
     """Get a jitted time series interpolation function for jax.
 
     The returned object is a :class:`jax.tree_util.Partial`, so the captured
-    ``time_s`` and ``data`` arrays are pytree leaves rather than hidden
-    closure state. This makes the function safe to use as a forcing in
-    ensembles stacked via :mod:`scm.ensemble`.
+    ``time_s`` and ``data`` arrays are pytree leaves rather than hidden state.
 
     Parameters
     ----------

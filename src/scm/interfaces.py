@@ -22,21 +22,10 @@ from scm.mynn.interfaces import DiagVarsMYNN, GradVarsMYNN, ProgVarsMYNN
 ParamsT = TypeVar("ParamsT")
 
 
+@jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class Simulation:
-    """Simulation setup container.
-
-    Pytree split:
-      * Data (children, traced): ``init``, ``forcing``, ``mo_settings``,
-        ``th_ref``, ``t_index_fn``. These leaf arrays gain a leading axis
-        under :func:`scm.ensemble.stack` and are mapped over by
-        ``vmap``/``pmap``.
-      * Meta (static, identical across ensemble members): ``name``,
-        ``grid``, ``t_start_s``, ``t_end_s``. These are consumed at trace
-        time (e.g. by ``jnp.arange(t_start_s, t_end_s)`` in the time loop
-        and by static-shape grid arithmetic) and must therefore be the
-        same Python value for every member.
-    """
+    """Simulation setup container."""
 
     name: str
     grid: StaggeredGrid
@@ -107,44 +96,9 @@ class Simulation:
         return dataclasses.replace(self, **kwargs)
 
 
-jax.tree_util.register_dataclass(
-    Simulation,
-    data_fields=["init", "forcing", "mo_settings", "th_ref", "t_index_fn"],
-    meta_fields=["name", "grid", "t_start_s", "t_end_s"],
-)
-
-
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class Forcing:
-    """Time-dependent boundary and large-scale forcing for a Simulation.
-
-    Each callable field takes simulation time ``t_s`` (seconds) and returns
-    the forcing value at that time. Functions must be written so their
-    captured arrays stay visible to JAX's pytree machinery — otherwise
-    transformations like ``vmap``, ``pmap``, ``jit``, and ``grad`` cannot see
-    them, and a ``Forcing`` cannot participate in an ensemble.
-
-    Use :class:`jax.tree_util.Partial` to bind captured arrays:
-
-        from jax.tree_util import Partial
-
-        def _const(value, t_s):           return value
-        def _linear(a, b, t_s):           return a + b * t_s
-
-        Forcing(
-            u_geo=Partial(_const, ug),                  # ug is a pytree leaf
-            th_s=Partial(_linear, th_s_0, cooling_rate),
-            ...
-        )
-
-    The function (``_const``, ``_linear``) is the static evaluator; the
-    trailing args are pytree children. This makes the captured arrays
-    stack-able across ensemble members (see :mod:`scm.ensemble`) and
-    differentiable via ``jax.grad``. Plain Python lambdas with closure
-    captures still work for single-member runs but will break ensembles.
-    """
-
     # Geostrophic wind components
     u_geo: ForceSingleFn = meta_field("u geostrophic wind", "m/s", level="full")  # must return (Nz,)
     v_geo: ForceSingleFn = meta_field("v geostrophic wind", "m/s", level="full")  # must return (Nz,)

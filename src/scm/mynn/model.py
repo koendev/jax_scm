@@ -22,7 +22,7 @@ def init_model(sim: Simulation, cfg: Namelist) -> ModelFn:
     forcing: Forcing = sim.forcing
 
     # Create MO model
-    z_mo = grid.dz / 2  # = grid.z[0]; written this way to stay a Python float under tracing
+    z_mo = float(grid.z[0])
     eval_mo = init_mo_sfc(
         z0m=sim.mo_settings.z0m,
         z0h=sim.mo_settings.z0h,

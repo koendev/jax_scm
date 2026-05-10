@@ -43,7 +43,7 @@ def use_jit(request):
 @pytest.fixture
 def mo_settings() -> MOSettings:
     """Fixture for MO settings serialization test."""
-    sf = BusingerDyerSimFuncs.unified(b=10, gamma=10)
+    sf = BusingerDyerSimFuncs(b=10, gamma=10)
     return MOSettings(z0m=0.1, z0h=0.01, sim_funcs=sf)
 
 
@@ -184,7 +184,7 @@ def test_sukanta_matlab(use_jit):
     mo = init_mo_sfc(
         z0m=0.1,
         z0h=0.1,
-        sim_funcs=BusingerDyerSimFuncs.unified(b=5.0, gamma=15.0),
+        sim_funcs=BusingerDyerSimFuncs(b=5.0, gamma=15.0),
         z=z,
         prescribe="w_th_s",
     )

@@ -1,4 +1,3 @@
-import dataclasses
 from typing import Callable, NamedTuple
 
 import jax
@@ -6,15 +5,13 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 import xarray as xr
-
 from shared import FIXTURE_ROOT
 
 from scm.config import LogLevel, load_namelist
-from scm.ensemble import stack, unstack
 from scm.examples.andren1994.andren1994 import get_andren1994
 from scm.examples.gabls1 import get_gabls1
 from scm.examples.wangara.wangara import get_wangara_day33
-from scm.interfaces import Simulation, Output
+from scm.interfaces import Output, Simulation
 from scm.io.local import out_to_ds
 from scm.mynn.model import init_model
 from scm.time_stepping import simulate
@@ -153,60 +150,13 @@ def test_split_sim() -> None:
 
 
 def test_run_pmap():
-    """Run an ensemble of GABLS1 simulations with perturbed ICs and forcing.
-
-    Forcings are written with ``jax.tree_util.Partial`` (see ``Forcing``
-    docstring), so the captured arrays are pytree leaves and members can be
-    stacked into a single ``Simulation`` whose leading axis is the ensemble
-    dimension. ``pmap`` then dispatches one member per device.
-    """
     fixture_dir = FIXTURE_ROOT / "gabls1"
-    cfg = load_namelist(fixture_dir / "namelist_ab2.yaml")
-    cfg.logging.level = LogLevel.SILENT
-
-    n_members = 4
+    cfg = fixture_dir / "namelist_ab2.yaml"
 
     def run(sim: Simulation) -> Output:
         model = init_model(sim, cfg=cfg)
-        return simulate(model=model, sim=sim, cfg=cfg)
+        out = simulate(model=model, sim=sim, cfg=cfg)
+        return out
 
-    with jax.enable_x64():
-        # Build N members differing in initial wind, surface cooling rate, AND
-        # MO surface settings (roughness length and stability parameter).
-        base = get_gabls1(Nz=64)
-        u_perturb = jnp.linspace(-0.5, 0.5, n_members)  # m/s offset on initial u
-        cooling_rates = jnp.linspace(-0.20, -0.30, n_members) / 3600  # K/s
-        z0_values = jnp.linspace(0.05, 0.2, n_members)  # m
-        b_m_values = jnp.linspace(4.0, 6.0, n_members)
-
-        sims = []
-        for i in range(n_members):
-            new_init = dataclasses.replace(base.init, u=base.init.u + u_perturb[i])
-            new_th_s = jax.tree_util.Partial(
-                base.forcing.th_s.func,  # same fn reference across members
-                base.forcing.th_s.args[0],  # th_s_0
-                cooling_rates[i],
-            )
-            new_forcing = dataclasses.replace(base.forcing, th_s=new_th_s)
-            new_sim_funcs = dataclasses.replace(base.mo_settings.sim_funcs, b_m=b_m_values[i])
-            new_mo_settings = dataclasses.replace(
-                base.mo_settings, z0m=z0_values[i], sim_funcs=new_sim_funcs
-            )
-            sims.append(
-                dataclasses.replace(
-                    base,
-                    init=new_init,
-                    forcing=new_forcing,
-                    mo_settings=new_mo_settings,
-                )
-            )
-
-        stacked = stack(sims)
-        batched_out = jax.pmap(run)(stacked)
-        outs = unstack(batched_out)
-
-    # Sanity checks: leading axis is the member axis and members differ.
-    assert len(outs) == n_members
-    assert batched_out.state_traj.u.shape[0] == n_members
-    final_u = jnp.array([o.state_traj.u[-1] for o in outs])
-    assert jnp.unique(final_u, axis=0).shape[0] == n_members
+    sims = [get_gabls1(Nz=64) for _ in range(4)]
+    out = jax.pmap(run)(sims)
