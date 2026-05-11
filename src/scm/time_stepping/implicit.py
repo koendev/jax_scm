@@ -1,56 +1,45 @@
 """Semi-implicit Crank-Nicolson solver for vertical diffusion.
 
-Discretization
---------------
-For a prognostic variable φ on Nz full levels with diffusivity K on Nz+1 half levels:
+Scheme
+------
+For a prognostic variable φ on Nz full levels, diffusivity K on Nz+1 half levels,
+and an optional linear decay rate r:
 
-    ∂φ/∂t = -(∂F/∂z) + S,    F[i] = -K[i] * (φ[i] - φ[i-1]) / dz
+    ∂φ/∂t = A φ − r φ + b,    A = ∂/∂z (K ∂/∂z)
 
-Boundary conditions
--------------------
-* Bottom face (i=0): flux is prescribed externally (from MO, treated **explicitly**).
-  Internally K_eff[0] = 0 so the surface face is excluded from the implicit operator.
-* Top face (i=Nz): zero flux. Enforced by setting K_eff[Nz] = 0 in the operator.
+Boundary conditions: K_eff[0] = K_eff[Nz] = 0, so both boundary faces carry zero
+flux from the implicit operator. The surface flux enters explicitly as b[0] = F_sfc/dz.
 
-Crank-Nicolson scheme (K fixed at current time step)
------------------------------------------------------
-    (I - dt/2 * A + dt/2 * R) φ^{n+1} = (I + dt/2 * A - dt/2 * R) φ^n + dt * S + dt * b_sfc
+Crank-Nicolson (K and r fixed at current step)
+-----------------------------------------------
+    (I − α·A + α·R) φⁿ⁺¹ = (I + α·A − α·R) φⁿ + dt·b,   α = dt/2
 
-where A is the tridiagonal diffusion matrix with coefficients (using K_eff):
-    A[j, j-1] = K_eff[j] / dz²           (sub-diagonal)
-    A[j,   j] = -(K_eff[j] + K_eff[j+1]) / dz²   (diagonal)
-    A[j, j+1] = K_eff[j+1] / dz²         (super-diagonal)
+This module exposes three pure primitives that map directly onto that equation:
+  build_diffusion_op  — K → TridiagOp (sparse representation of A)
+  apply_op            — (A, φ) → A·φ  (matrix-vector product without allocation)
+  cn_solve_1d         — one CN step for a single 1-D variable
 
-and R = diag(decay_rate) is an optional diagonal destruction term (used for
-semi-implicit QKE dissipation) and b_sfc[0] = sfc_flux / dz,  b_sfc[j>0] = 0.
-
-Semi-implicit QKE dissipation
-------------------------------
-The dissipation term eps = q³/(B1·L) = qke^{3/2}/(B1·L) is nonlinear and can
-drive instability when the dissipation timescale τ = B1·L/(2·q) is shorter than
-the timestep.  Explicit treatment gives qke^{n+1} = qke^n·(1 - dt·r), which goes
-negative once dt > τ.
-
-To avoid this, eps is quasi-linearised: eps ≈ r·qke with the rate
-
-    r = qke_eps / qke = 2·sqrt(qke) / (B1·L_full)    [1/s]
-
-evaluated at the current step (lagged, consistent with how K is lagged).  The
-semi-implicit form qke^{n+1} = qke^n / (1 + dt·r) is unconditionally positive.
-
-Typical values: near the surface (L~5 m, q~1 m/s) τ ≈ 60 s; at the BL top
-(L~50 m, q~0.5 m/s) τ ≈ 1200 s.  The clip to qke_min in the denominator
-prevents r from blowing up when qke sits at the numerical floor.
+These are assembled into the MYNN-specific multi-variable stepper by
+``get_cn_step_fn``, which vmaps the single-variable solve over all five prognostic
+variables and returns the ``(cn_warmup, cn_step)`` pair expected by ``simulate()``.
 
 AB2 extrapolation
 -----------------
-Explicit sources S and surface fluxes (from MO) are both AB2-extrapolated from
-the two most recent time levels before being passed to the CN solve.
+Explicit sources S and MO surface fluxes are AB2-extrapolated inside ``cn_step``
+before being handed to the CN solve. On warmup both history fields equal the
+current-step value, so AB2 degenerates to Euler.
+
+Semi-implicit QKE dissipation
+------------------------------
+ε = qke^{3/2}/(B1·L) is quasi-linearised as r·qke with
+    r = ε/qke = √qke/(B1·L)   [s⁻¹]
+evaluated at the current step and passed as the ``decay`` argument to ``cn_solve_1d``.
+The implicit form φⁿ⁺¹ = φⁿ/(1 + dt·r) is unconditionally positive.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Tuple
+from typing import Callable, NamedTuple, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -63,72 +52,66 @@ from scm.mynn.interfaces import ProgVarsMYNN
 from scm.time_stepping.utils import StepCarry, clip_state
 
 
-def get_cn_sparse_lin_system(
-    phi_i: jnp.ndarray,
-    K: jnp.ndarray,
+class TridiagOp(NamedTuple):
+    """Sparse tridiagonal diffusion operator (sub-diagonal, diagonal, super-diagonal)."""
+
+    dl: jnp.ndarray  # K[j]/dz², shape (Nz,)
+    d: jnp.ndarray  # -(K[j]+K[j+1])/dz², shape (Nz,)
+    du: jnp.ndarray  # K[j+1]/dz², shape (Nz,)
+
+
+def build_diffusion_op(K: jnp.ndarray, dz: float) -> TridiagOp:
+    """Build the tridiagonal diffusion operator A from half-level diffusivities.
+
+    Zero-flux BCs are imposed by zeroing K at both boundary faces before
+    computing coefficients, so neither the bottom surface flux nor the top
+    no-flux condition appear in the implicit operator.
+    """
+    K = K.at[0].set(0.0).at[-1].set(0.0)
+    dl = K[:-1] / dz**2
+    du = K[1:] / dz**2
+    return TridiagOp(dl=dl, d=-(dl + du), du=du)
+
+
+def apply_op(A: TridiagOp, phi: jnp.ndarray) -> jnp.ndarray:
+    """Compute A @ phi without materialising the full matrix."""
+    phi_below = jnp.concatenate([jnp.zeros(1), phi[:-1]])
+    phi_above = jnp.concatenate([phi[1:], jnp.zeros(1)])
+    return A.dl * phi_below + A.d * phi + A.du * phi_above
+
+
+def cn_solve_1d(
+    A: TridiagOp,
+    phi: jnp.ndarray,
     dt: float,
-    dz: float,
-    S: jnp.ndarray,
-    sfc_flux: float | jnp.ndarray,
-    decay_rate: float | jnp.ndarray = 0.0,
-) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    """Get sparse linear system for one CN diffusion step of a single variable.
+    rhs: jnp.ndarray,
+    decay: jnp.ndarray | float = 0.0,
+) -> jnp.ndarray:
+    """One Crank-Nicolson step for a single 1-D variable.
+
+    Solves:  (I − α·A + α·R) φⁿ⁺¹ = (I + α·A − α·R) φⁿ + dt·rhs,   α = dt/2
 
     Parameters
     ----------
-    phi_i : jnp.ndarray, shape (Nz,)
-        State at current time step (full levels).
-    K : jnp.ndarray, shape (Nz+1,)
-        Eddy diffusivity on half levels (from closure, kept constant).
-    dt : float
-        Time step [s].
-    dz : float
-        Grid spacing [m].
-    S : jnp.ndarray, shape (Nz,)
-        Explicit (non-diffusive) tendency at current step (e.g. Coriolis, production).
-    sfc_flux : float or scalar jnp.ndarray
-        Surface flux F_sfc = -K_sfc * dφ/dz|_sfc  (sign convention: positive = upward).
-        Contributes as +sfc_flux/dz to the tendency at the bottom cell.
-    decay_rate : float or jnp.ndarray, shape () or (Nz,), optional
-        Linear destruction rate r such that the implicit decay term is -r*φ.
-        Adds (dt/2)*r to the LHS diagonal and subtracts (dt/2)*r*φ from the RHS.
-        Default 0 (no implicit decay).  Used for semi-implicit QKE dissipation.
-
-    Returns
-    -------
-    lhs_dl, lhs_d, lhs_du, rhs : jnp.ndarray, shape (Nz,)
-        Tridiagonal system ready for ``tridiagonal_solve``.
+    A     : diffusion operator from build_diffusion_op
+    phi   : current state, shape (Nz,)
+    dt    : time step [s]
+    rhs   : explicit source including any surface-flux term, shape (Nz,)
+    decay : linear destruction rate r [s⁻¹], scalar or shape (Nz,)
     """
-    # Zero out boundary faces so they are handled as explicit BCs, not implicit diffusion
-    K_eff = K.at[0].set(0.0).at[-1].set(0.0)
+    alpha = dt / 2.0
 
-    # Sub-diagonal: K at lower face of each cell
-    A_dl = K_eff[:-1] / dz**2  # shape (Nz,); a[j] = K_eff[j]
-    # Super-diagonal: K at upper face of each cell
-    A_du = K_eff[1:] / dz**2  # shape (Nz,); c[j] = K_eff[j+1]
-    # Diagonal
-    A_d = -(A_dl + A_du)  # shape (Nz,)
+    # RHS: (I + α·A − α·R) φⁿ + dt·rhs
+    b = phi + alpha * apply_op(A, phi) - alpha * decay * phi + dt * rhs
 
-    # Surface-flux explicit source: b_sfc[0] = sfc_flux / dz, zero elsewhere
-    b_sfc = jnp.zeros_like(phi_i).at[0].set(sfc_flux / dz)
-
-    # CN LHS: I - dt/2 * A + dt/2 * R  (R = diag(decay_rate))
-    lhs_d = 1 - (dt / 2.0) * A_d + (dt / 2.0) * decay_rate
-    lhs_dl = -(dt / 2.0) * A_dl
-    lhs_du = -(dt / 2.0) * A_du
-
-    # CN RHS: (I + dt/2 * A - dt/2 * R) φ^n + dt * S + dt * b_sfc
-    rhs = (
-        phi_i
-        + (dt / 2.0) * A_d * phi_i
-        + (dt / 2.0) * A_dl * jnp.concatenate([jnp.zeros(1), phi_i[:-1]])  # phi[j-1]
-        + (dt / 2.0) * A_du * jnp.concatenate([phi_i[1:], jnp.zeros(1)])  # phi[j+1]
-        - (dt / 2.0) * decay_rate * phi_i
-        + dt * S
-        + dt * b_sfc
+    # LHS: I − α·A + α·R  (tridiagonal)
+    lhs = TridiagOp(
+        dl=-alpha * A.dl,
+        d=1.0 - alpha * A.d + alpha * decay,
+        du=-alpha * A.du,
     )
 
-    return lhs_dl, lhs_d, lhs_du, rhs
+    return tridiagonal_solve(lhs.dl, lhs.d, lhs.du, b[:, None]).squeeze(-1)
 
 
 def get_cn_step_fn(
@@ -139,15 +122,14 @@ def get_cn_step_fn(
 
     Returns
     -------
-    cn_warmup : Callable
-        ``(t_s, dt_s, y0, params) -> StepCarry``
-        Builds the initial carry from a raw state.  AB2 degenerates to Euler
-        because prev_tends and prev_mo are set equal to the current-step values.
-    cn_step : Callable
-        ``(carry: StepCarry, t_s, dt_s, params) -> StepCarry``
-        Regular CN step.  AB2-extrapolates both explicit sources and MO surface
-        fluxes; treats QKE dissipation semi-implicitly on the CN diagonal.
+    cn_warmup : (t_s, dt_s, y0, params) -> StepCarry
+    cn_step   : (carry: StepCarry, t_s, dt_s, params) -> StepCarry
     """
+    dz = grid.dz
+
+    def _sfc_rhs(flux: jnp.ndarray, Nz: int) -> jnp.ndarray:
+        """Spread a surface flux into the bottom-cell explicit source."""
+        return jnp.zeros(Nz).at[0].set(flux / dz)
 
     def _apply_cn(
         y: ProgVarsMYNN,
@@ -156,54 +138,40 @@ def get_cn_step_fn(
         mo_res,
         dt_s: float,
     ) -> ProgVarsMYNN:
-        """Solve one CN step for every prognostic variable.
+        """Batched CN solve over all five prognostic variables in one call."""
+        Nz = y.u.shape[0]
 
-        K is fixed at the current-step value (lagged).  Surface fluxes are taken
-        from ``mo_res`` which has already been AB2-extrapolated by the caller.
-        QKE dissipation is treated semi-implicitly via the decay_rate argument.
-        """
-        dz = grid.dz
+        phi = jnp.stack([y.u, y.v, y.th, y.qv, y.qke])  # (5, Nz)
+        K_vars = jnp.stack([diag.Km, diag.Km, diag.Kh, diag.Kh, diag.Kq])  # (5, Nz+1)
+        rhs = jnp.stack(
+            [  # (5, Nz)
+                S.u + _sfc_rhs(mo_res.u_w, Nz),
+                S.v + _sfc_rhs(mo_res.v_w, Nz),
+                S.th + _sfc_rhs(mo_res.w_th, Nz),
+                S.qv + _sfc_rhs(mo_res.w_qv, Nz),
+                S.qke,  # no surface flux for QKE
+            ]
+        )
 
-        # Semi-implicit QKE decay rate: r = eps/qke = qke^{1/2} / (B1 * L_full)
         qke_decay = diag.qke_eps / jnp.clip(y.qke, min=consts.qke_min)
+        decay = jnp.zeros_like(phi).at[4].set(qke_decay)  # (5, Nz)
 
-        u_sys = get_cn_sparse_lin_system(y.u, diag.Km, dt_s, dz, S.u, mo_res.u_w)
-        v_sys = get_cn_sparse_lin_system(y.v, diag.Km, dt_s, dz, S.v, mo_res.v_w)
-        th_sys = get_cn_sparse_lin_system(y.th, diag.Kh, dt_s, dz, S.th, mo_res.w_th)
-        qv_sys = get_cn_sparse_lin_system(y.qv, diag.Kh, dt_s, dz, S.qv, mo_res.w_qv)
-        qke_sys = get_cn_sparse_lin_system(y.qke, diag.Kq, dt_s, dz, S.qke, 0.0, decay_rate=qke_decay)
+        ops = jax.vmap(build_diffusion_op, in_axes=(0, None))(K_vars, dz)
+        phi_new = jax.vmap(cn_solve_1d, in_axes=(0, 0, None, 0, 0))(ops, phi, dt_s, rhs, decay)  # (5, Nz)
 
-        # Stack to solve in batch
-        lhs_dl, lhs_d, lhs_du, rhs = zip(*[u_sys, v_sys, th_sys, qv_sys, qke_sys])
-        lhs_dl = jnp.stack(lhs_dl)
-        lhs_d = jnp.stack(lhs_d)
-        lhs_du = jnp.stack(lhs_du)
-        rhs = jnp.stack(rhs)[:, :, None]
+        return ProgVarsMYNN(u=phi_new[0], v=phi_new[1], th=phi_new[2], qv=phi_new[3], qke=phi_new[4])
 
-        y_new = tridiagonal_solve(dl=lhs_dl, d=lhs_d, du=lhs_du, b=rhs).squeeze(-1)
-        return ProgVarsMYNN(u=y_new[0], v=y_new[1], th=y_new[2], qv=y_new[3], qke=y_new[4])
+    def _ab2(a, b):
+        return jax.tree_util.tree_map(lambda x, y: 1.5 * x - 0.5 * y, a, b)
 
     def cn_warmup(t_s, dt_s, y0, params) -> StepCarry:
-        """Build initial carry from a raw state.
-
-        Evaluates the model once and applies one CN step with AB2 degenerated to
-        Euler (prev_tends = S0, prev_mo = mo0 so the 3/2 - 1/2 = 1 cancels).
-        """
         S0, diag0, mo0 = model(t_s, y0, params)
-        y1 = _apply_cn(y0, S0, diag0, mo0, dt_s)
-        y1 = clip_state(y1)
+        y1 = clip_state(_apply_cn(y0, S0, diag0, mo0, dt_s))
         return StepCarry(y=y1, prev_tends=S0, prev_mo=mo0, diag=diag0, mo=mo0)
 
     def cn_step(carry: StepCarry, t_s, dt_s, params) -> StepCarry:
-        """Regular CN step with AB2-extrapolated explicit sources and surface fluxes."""
         S1, diag1, mo1 = model(t_s, carry.y, params)
-
-        # AB2-extrapolate explicit sources and MO surface fluxes to the midpoint
-        S_ab2 = jax.tree_util.tree_map(lambda s1, s0: (3 / 2) * s1 - (1 / 2) * s0, S1, carry.prev_tends)
-        mo_ab2 = jax.tree_util.tree_map(lambda a, b: (3 / 2) * a - (1 / 2) * b, mo1, carry.prev_mo)
-
-        y2 = _apply_cn(carry.y, S_ab2, diag1, mo_ab2, dt_s)
-        y2 = clip_state(y2)
+        y2 = clip_state(_apply_cn(carry.y, _ab2(S1, carry.prev_tends), diag1, _ab2(mo1, carry.prev_mo), dt_s))
         return StepCarry(y=y2, prev_tends=S1, prev_mo=mo1, diag=diag1, mo=mo1)
 
     return cn_warmup, cn_step
