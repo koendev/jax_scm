@@ -7,6 +7,16 @@ coupling, and is designed for research use.
 ![coverage](docs/coverage-badge.svg)
 ![tests](docs/test-badge.svg)
 
+
+> [!TIP]
+> To get a quick taste of JAX-SCM, you can **run the GABLS1 stable boundary layer case in your browser**!
+> Just click the "Open in Colab" button below, which will open an [example notebook](examples/GABLS1_interactive.ipynb)
+> in [Google Colab](https://colab.research.google.com/).
+>
+> <a target="_blank" href="https://colab.research.google.com/github/mpierzyna/jax_scm/blob/main/examples/GABLS1_interactive.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
+>
+> No local installation is required!
+
 ## Installation
 
 This project uses [`uv`](https://docs.astral.sh/uv/) for package management. Install it first if you don't have it.
@@ -15,10 +25,10 @@ Then clone the repository and install in editable mode:
 ```bash
 git clone <repo-url>
 cd jax-scm
-uv sync
+uv sync  # CPU only
 ```
 
-On Linux, JAX with CUDA support is installed automatically. On macOS, the CPU build is used.
+To install JAX with CUDA GPU support, run `uv sync --extra cuda` instead.
 
 Verify the installation:
 
@@ -26,7 +36,7 @@ Verify the installation:
 uv run python -c "import scm; print('OK')"
 ```
 
-## Quick Start
+## Simulation Setup
 
 Run your own simulations from the `workspaces/` directory. Create a new file, e.g., `my_run.py` in a subdirectory and
 set up the simulation as follows.
