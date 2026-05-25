@@ -1,3 +1,5 @@
+"""Low-level helpers for rendering figures and values used by the HTML reporter."""
+
 import base64
 import io
 import pathlib
@@ -15,7 +17,21 @@ def dict_to_css(d: dict) -> str:
 
 
 def fig_to_png_base64(fig: plt.Figure, **save_kwargs) -> str:
-    """Render matplotlib figure as PNG into buffer and encode it as base64 string for web display."""
+    """Render a matplotlib figure to PNG and return the base64-encoded string.
+
+    Parameters
+    ----------
+    fig : plt.Figure
+        Figure to render.
+    **save_kwargs
+        Additional keyword arguments forwarded to ``fig.savefig``.
+
+    Returns
+    -------
+    str
+        UTF-8 base64 string of the PNG image, suitable for embedding in an
+        HTML ``<img>`` ``src`` attribute.
+    """
     fig_buffer = io.BytesIO()
     fig.savefig(fig_buffer, format="png", **save_kwargs)
     fig_buffer.seek(0)
@@ -23,7 +39,21 @@ def fig_to_png_base64(fig: plt.Figure, **save_kwargs) -> str:
 
 
 def fig_to_svg_base64(fig: plt.Figure, **save_kwargs) -> str:
-    """Render matplotlib figure as SVG and return it as base64 encoded string for web display."""
+    """Render a matplotlib figure to SVG and return the base64-encoded string.
+
+    Parameters
+    ----------
+    fig : plt.Figure
+        Figure to render.
+    **save_kwargs
+        Additional keyword arguments forwarded to ``fig.savefig``.
+
+    Returns
+    -------
+    str
+        UTF-8 base64 string of the SVG image, suitable for embedding in an
+        HTML ``<img>`` ``src`` attribute.
+    """
     fig_buffer = io.StringIO()
     fig.savefig(fig_buffer, format="svg", **save_kwargs)
     fig_svg_str = fig_buffer.getvalue()

@@ -1,3 +1,5 @@
+"""MYNN model assembly: wires closure, surface layer, and forcing into a single ``ModelFn``."""
+
 from __future__ import annotations
 
 from typing import Tuple
@@ -16,7 +18,34 @@ from scm.mynn.interfaces import DiagVarsMYNN, GradVarsMYNN, ProgVarsMYNN
 
 
 def init_model(sim: Simulation, cfg: Namelist) -> ModelFn:
-    """Initialize MYNN model function for time stepper."""
+    """Build the MYNN model function for use by the time stepper.
+
+    Captures the grid, forcing, Monin-Obukhov solver, and MYNN closure in a
+    closure so the returned :class:`~scm.interfaces.ModelFn` is a pure function
+    of ``(t_s, state, params)`` compatible with ``jax.lax.scan`` and ``jax.grad``.
+
+    Parameters
+    ----------
+    sim : Simulation
+        Simulation setup including grid, forcing, MO settings, and reference
+        potential temperature.
+    cfg : Namelist
+        Run-time configuration controlling the number of MO iterations and
+        whether the time integration is implicit or explicit.
+
+    Returns
+    -------
+    ModelFn
+        Callable ``(t_s, state, params) → (tendencies, diag, mo_result)``
+        representing the ODE right-hand side.
+
+    Notes
+    -----
+    When ``cfg.is_implicit`` is ``True``, flux divergences are set to zero here
+    and solved inside the Crank-Nicolson time stepper instead.  Large-scale
+    temperature advection is estimated from the thermal-wind relation when
+    ``forcing.ls_tends`` is ``None`` (NN09, eq. 3).
+    """
     # Make grid and forcing available locally
     grid: StaggeredGrid = sim.grid
     forcing: Forcing = sim.forcing
@@ -36,7 +65,31 @@ def init_model(sim: Simulation, cfg: Namelist) -> ModelFn:
     closure_fn = init_closure(grid=grid, th_ref=sim.th_ref)
 
     def _model(t_s: jnp.ndarray, state: ProgVarsMYNN, params: ParamsT) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult]:
-        """Model function takes state and forcing and returns tendencies and diagnostics."""
+        """Evaluate the MYNN model right-hand side for one time step.
+
+        Calls the Monin-Obukhov surface layer solver, computes vertical gradients,
+        runs the MYNN 2.5 closure, forms flux-divergence tendencies (or zeros them in
+        implicit mode), adds Coriolis and geostrophic forcing, and optionally appends
+        large-scale tendency increments.
+
+        Parameters
+        ----------
+        t_s : jnp.ndarray
+            Current simulation time in seconds (scalar).
+        state : ProgVarsMYNN
+            Prognostic state on full levels at the current time step.
+        params : ParamsT
+            MYNN closure parameters forwarded to the turbulence scheme.
+
+        Returns
+        -------
+        ProgVarsMYNN
+            Tendencies (time derivatives) for every prognostic variable on full levels.
+        DiagVarsMYNN
+            Turbulent fluxes, length scales, eddy diffusivities, and TKE budget terms.
+        MOResult
+            Surface-layer result from the Monin-Obukhov solver.
+        """
         # Unpack state
         u, v, th, qke, qv = state.u, state.v, state.th, state.qke, state.qv
 

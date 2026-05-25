@@ -1,3 +1,5 @@
+"""Utilities for reconstructing a :class:`~scm.interfaces.Simulation` from a saved xarray Dataset."""
+
 import jax.numpy as jnp
 import xarray as xr
 

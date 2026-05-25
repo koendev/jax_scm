@@ -1,3 +1,5 @@
+"""Temporal and vertical interpolation utilities for forcing data."""
+
 from __future__ import annotations
 
 from typing import Callable
@@ -51,7 +53,21 @@ def get_ts_interp_fn(time_s: jnp.ndarray, data: jnp.ndarray) -> Callable[[jnp.nd
 
 
 def interp_dtindex(t_s: np.ndarray, idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
-    """Interpolate a DatetimeIndex to new timestamps."""
+    """Interpolate a DatetimeIndex to new timestamps given in seconds.
+
+    Parameters
+    ----------
+    t_s : np.ndarray
+        1D array of elapsed seconds (relative to ``idx[0]``) at which to
+        evaluate the interpolated timestamps.
+    idx : pd.DatetimeIndex
+        Reference datetime index whose range spans ``t_s``.
+
+    Returns
+    -------
+    pd.DatetimeIndex
+        Interpolated timestamps corresponding to each value in ``t_s``.
+    """
     t_ns = (t_s * 1e9).astype(np.int64)
     idx_ns = idx.astype("datetime64[ns]").astype(np.int64)
     idx_ns_interp = np.interp(t_ns, idx_ns - idx_ns[0], idx_ns)
@@ -60,7 +76,27 @@ def interp_dtindex(t_s: np.ndarray, idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
 
 
 def xr_interp_vert(ds: xr.Dataset, z: xr.DataArray, z_target: xr.DataArray, dim: str) -> xr.Dataset:
-    """ATTENTION! z and z target must increase monotonically!"""
+    """Linearly interpolate an xarray Dataset along a vertical dimension.
+
+    Both ``z`` and ``z_target`` must increase monotonically.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing variables with the vertical dimension ``dim``.
+    z : xr.DataArray
+        Current vertical coordinate values (must be monotonically increasing).
+    z_target : xr.DataArray
+        Target vertical levels (must be monotonically increasing).
+    dim : str
+        Name of the vertical dimension in ``ds``, ``z``, and ``z_target``.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset interpolated onto ``z_target``; original variable attributes are
+        preserved and ``dim`` is reassigned to ``z_target`` values.
+    """
 
     def _searchsorted(a, v):
         # Break out function for debugging apply_ufunc

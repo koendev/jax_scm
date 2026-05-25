@@ -1,3 +1,10 @@
+"""Monin-Obukhov surface-layer similarity theory for the SCM.
+
+Provides the Obukhov length, Businger-Dyer stability functions, and an
+iterative surface-flux solver (``init_mo_sfc``) that supports either a
+prescribed surface heat flux or a prescribed surface temperature.
+"""
+
 from __future__ import annotations
 
 import abc
@@ -19,7 +26,17 @@ SimFuncType = Callable[[jnp.ndarray], jnp.ndarray]
 
 @dataclasses.dataclass(kw_only=True)
 class MOSettings:
-    """Settings for MO atmosphere surface coupling."""
+    """Configuration for Monin-Obukhov atmosphere–surface coupling.
+
+    Attributes
+    ----------
+    z0m : float
+        Momentum roughness length (m).
+    z0h : float
+        Heat roughness length (m).
+    sim_funcs : MOSimilarityFuncs
+        Stability (similarity) functions; defaults to Businger-Dyer.
+    """
 
     z0m: float = meta_field("Momentum roughness length", units="m", level="surface")
     z0h: float = meta_field("Heat roughness length", units="m", level="surface")
@@ -29,6 +46,7 @@ class MOSettings:
 
     @property
     def mh_ratio(self):
+        """Ratio z0m / z0h used to scale stability functions at the heat roughness height."""
         return self.z0m / self.z0h
 
     def serialize(self) -> str:
@@ -72,6 +90,8 @@ class MOResult:
 
 
 class MOFunc(Protocol):
+    """Protocol for the surface Monin-Obukhov solver returned by ``init_mo_sfc``."""
+
     def __call__(
         self,
         *,
@@ -82,21 +102,87 @@ class MOFunc(Protocol):
         w_qv_s: jnp.ndarray | float,
         w_th_s: jnp.ndarray | float | None = None,
         th_s: jnp.ndarray | float | None = None,
-    ) -> MOResult: ...
+    ) -> MOResult:
+        """Evaluate surface fluxes using Monin-Obukhov similarity theory.
+
+        Parameters
+        ----------
+        u_0 : jnp.ndarray or float
+            Zonal wind speed at the lowest model level (m/s).
+        v_0 : jnp.ndarray or float
+            Meridional wind speed at the lowest model level (m/s).
+        th_0 : jnp.ndarray or float
+            Dry potential temperature at the lowest model level (K).
+        qv_0 : jnp.ndarray or float
+            Specific humidity at the lowest model level (kg/kg).
+        w_qv_s : jnp.ndarray or float
+            Prescribed surface moisture flux w'qv' ((kg/kg) m/s).
+        w_th_s : jnp.ndarray, float, or None
+            Prescribed sensible heat flux w'theta' (K m/s); used when
+            ``prescribe="w_th_s"``, ignored otherwise.
+        th_s : jnp.ndarray, float, or None
+            Prescribed surface potential temperature (K); used when
+            ``prescribe="th_s"``, ignored otherwise.
+
+        Returns
+        -------
+        MOResult
+            Surface-layer diagnostics including friction velocity, fluxes,
+            Obukhov length, and MOST-derived gradients.
+        """
+        ...
 
 
 class MOSimilarityFuncs(abc.ABC):
-    @abc.abstractmethod
-    def get_phi_m_fn(self) -> SimFuncType: ...
+    """Abstract base class for Monin-Obukhov flux-gradient and integrated similarity functions."""
 
     @abc.abstractmethod
-    def get_phi_h_fn(self) -> SimFuncType: ...
+    def get_phi_m_fn(self) -> SimFuncType:
+        """Return the dimensionless wind-shear flux-gradient function phi_m.
+
+        Returns
+        -------
+        SimFuncType
+            Callable ``(zeta: jnp.ndarray) -> jnp.ndarray`` where *zeta* = z/L
+            is the stability parameter and the output is phi_m (dimensionless).
+        """
+        ...
 
     @abc.abstractmethod
-    def get_psi_m_fn(self) -> SimFuncType: ...
+    def get_phi_h_fn(self) -> SimFuncType:
+        """Return the dimensionless temperature-gradient flux-gradient function phi_h.
+
+        Returns
+        -------
+        SimFuncType
+            Callable ``(zeta: jnp.ndarray) -> jnp.ndarray`` where *zeta* = z/L
+            is the stability parameter and the output is phi_h (dimensionless).
+        """
+        ...
 
     @abc.abstractmethod
-    def get_psi_h_fn(self) -> SimFuncType: ...
+    def get_psi_m_fn(self) -> SimFuncType:
+        """Return the integrated momentum stability correction function psi_m.
+
+        Returns
+        -------
+        SimFuncType
+            Callable ``(zeta: jnp.ndarray) -> jnp.ndarray`` where *zeta* = z/L
+            is the stability parameter and the output is psi_m (dimensionless).
+        """
+        ...
+
+    @abc.abstractmethod
+    def get_psi_h_fn(self) -> SimFuncType:
+        """Return the integrated heat stability correction function psi_h.
+
+        Returns
+        -------
+        SimFuncType
+            Callable ``(zeta: jnp.ndarray) -> jnp.ndarray`` where *zeta* = z/L
+            is the stability parameter and the output is psi_h (dimensionless).
+        """
+        ...
 
     def get_all_fns(self) -> Tuple[SimFuncType, SimFuncType, SimFuncType, SimFuncType]:
         """Convenience function: Get phi_m, phi_h, psi_m, psi_h functions all at once."""
@@ -113,6 +199,17 @@ class BusingerDyerSimFuncs(MOSimilarityFuncs):
     """
 
     def __init__(self, gamma: float = 16, b: float = 5):
+        """Initialise with shared stability parameters for momentum and heat.
+
+        Parameters
+        ----------
+        gamma : float
+            Unstable-regime coefficient (default 16); applied equally to
+            momentum and heat (gamma_m = gamma_h = gamma).
+        b : float
+            Stable-regime coefficient (default 5); applied equally to
+            momentum and heat (b_m = b_h = b).
+        """
         self.gamma_m = gamma
         self.gamma_h = gamma
         self.b_m = b
@@ -208,9 +305,26 @@ class BusingerDyerSimFuncs(MOSimilarityFuncs):
 
 
 class BusingerDyerAltSimFuncs(BusingerDyerSimFuncs):
-    """Alternative formulation allowing separate gamma and b for momentum and heat"""
+    """Businger-Dyer formulation with independent stability parameters for momentum and heat.
+
+    Inherits all similarity-function implementations from ``BusingerDyerSimFuncs``
+    but allows gamma and b to differ between the momentum and heat channels.
+    """
 
     def __init__(self, gamma_m: float = 16, gamma_h: float = 16, b_m: float = 5, b_h: float = 5):
+        """Initialise with independent stability parameters.
+
+        Parameters
+        ----------
+        gamma_m : float
+            Unstable-regime coefficient for momentum (default 16).
+        gamma_h : float
+            Unstable-regime coefficient for heat (default 16).
+        b_m : float
+            Stable-regime coefficient for momentum (default 5).
+        b_h : float
+            Stable-regime coefficient for heat (default 5).
+        """
         self.gamma_m = gamma_m
         self.gamma_h = gamma_h
         self.b_m = b_m
@@ -218,8 +332,24 @@ class BusingerDyerAltSimFuncs(BusingerDyerSimFuncs):
 
 
 def get_L_obukhov(u_st: jnp.ndarray, w_thv: jnp.ndarray, thv: jnp.ndarray) -> jnp.ndarray:
-    """Compute Obukhov length based on friction velocity and BOUYANCY flux.
-    For numerical stability, clip L to a reasonable range.
+    """Compute the Obukhov length from friction velocity and buoyancy flux.
+
+    Returns ``inf`` when the buoyancy flux is zero (neutral conditions).
+    A safe denominator is used to keep gradients finite under JAX AD.
+
+    Parameters
+    ----------
+    u_st : jnp.ndarray
+        Friction velocity u* (m/s).
+    w_thv : jnp.ndarray
+        Surface buoyancy flux w'theta_v' (K m/s).
+    thv : jnp.ndarray
+        Virtual potential temperature at the surface or lowest model level (K).
+
+    Returns
+    -------
+    jnp.ndarray
+        Obukhov length L (m); positive in stable, negative in unstable conditions.
     """
     # Safe denominator: AD still differentiates the false-branch expression even when the true-branch is selected,
     # so we must prevent division by zero there too.

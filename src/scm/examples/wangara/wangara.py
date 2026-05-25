@@ -1,3 +1,11 @@
+"""Wangara Day 33 convective boundary layer reference case.
+
+Reproduces the daytime convective boundary layer observed during the 1967
+Wangara experiment (Australia, 34.5°S) for Day 33, 09:00–16:00 local time.
+Forcing follows a cosine-shaped surface heat flux; initial profiles are
+read from the ``day33_0900.csv`` sounding.
+"""
+
 from __future__ import annotations
 
 import pathlib
@@ -20,6 +28,22 @@ _T_1400 = "1967-08-16T14:00"
 
 
 def get_wangara_day33(Nz: int = 50) -> Simulation:
+    """Build the Wangara Day 33 convective boundary layer simulation.
+
+    Parameters
+    ----------
+    Nz : int, optional
+        Number of vertical grid levels.  Defaults to 50.
+
+    Returns
+    -------
+    Simulation
+        Configured simulation over a 2000 m domain with cosine-shaped surface
+        heat and moisture fluxes, height-dependent geostrophic wind, and
+        initial profiles interpolated from the 09:00 sounding.  The
+        ``t_index_fn`` converts elapsed seconds to wall-clock timestamps
+        starting at 1967-08-16T09:00.
+    """
     ## Grid
     grid = StaggeredGrid(H=2000, Nz=Nz)
 
@@ -94,7 +118,22 @@ def get_wangara_day33(Nz: int = 50) -> Simulation:
 
 
 def postproc_wangara(ds: xr.Dataset) -> xr.Dataset:
-    """Get Wangara Day 33 diagnostics for validation plots."""
+    """Compute Wangara Day 33 diagnostics for validation plots.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Simulation output dataset as returned by ``out_to_ds``.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset containing: ``zi`` (inversion height, m), ``R`` (entrainment
+        ratio), ``w_st`` (convective velocity scale, m s⁻¹), ``tke_P_S``
+        and ``tke_P_B`` (normalised TKE shear and buoyancy production),
+        ``tke_eps`` (normalised TKE dissipation), and ``div_w_tke``
+        (normalised TKE flux divergence).
+    """
     # Inversion height as height of minimum sensible heatflux
     zi = ds["zh"].isel(zh=ds["w_th"].argmin("zh"))  # tab 1 caption
 

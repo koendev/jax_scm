@@ -1,3 +1,5 @@
+"""Disk-backed cache for xarray Datasets to avoid redundant network downloads."""
+
 from __future__ import annotations
 
 import hashlib
@@ -13,7 +15,19 @@ logger = logging.getLogger("scm.io.cache")
 
 
 class XRCache:
-    """Simple cache for xarray datasets to avoid redundant downloading."""
+    """Disk-backed cache that persists xarray Datasets as NetCDF files.
+
+    Results are keyed by an MD5 hash of the wrapped function's call arguments.
+    Cache files are stored as ``<cache_dir>/<fn_name>_<hash>.nc``.
+
+    Parameters
+    ----------
+    cache_dir : str or pathlib.Path
+        Directory in which cached NetCDF files are stored; created if absent.
+    disable : bool, optional
+        When ``True``, the cache is bypassed and the wrapped function is always
+        called directly.  Defaults to ``False``.
+    """
 
     def __init__(self, cache_dir: str | pathlib.Path, disable: bool = False):
         self.cache_dir = pathlib.Path(cache_dir)
@@ -22,7 +36,23 @@ class XRCache:
 
     @staticmethod
     def get_hash(fn: Callable, *args, **kwargs) -> str:
-        """Generate a hash string from function arguments and function itself."""
+        """Compute an MD5 hash from the positional and keyword arguments of a call.
+
+        Parameters
+        ----------
+        fn : Callable
+            The function being called (currently unused in the hash; reserved for
+            future function-code hashing).
+        *args
+            Positional arguments passed to ``fn``.
+        **kwargs
+            Keyword arguments passed to ``fn``.
+
+        Returns
+        -------
+        str
+            Hexadecimal MD5 digest string uniquely identifying the argument set.
+        """
 
         # Hash func code
         # This is based on https://github.com/joblib/joblib/blob/main/joblib/memory.py#L655
@@ -35,7 +65,23 @@ class XRCache:
         return hasher.hexdigest()
 
     def cache(self, fn: Callable[..., xr.Dataset]) -> Callable[..., xr.Dataset]:
-        """Decorator to cache xarray datasets returned by the decorated function."""
+        """Wrap a function so its xarray Dataset result is cached to disk.
+
+        On a cache hit the Dataset is loaded from the existing NetCDF file; on a
+        miss the function is called, the result is written to disk, and then
+        returned.
+
+        Parameters
+        ----------
+        fn : Callable[..., xr.Dataset]
+            Function whose return value should be cached.
+
+        Returns
+        -------
+        Callable[..., xr.Dataset]
+            Wrapped function with identical signature that transparently reads
+            from or writes to the cache.
+        """
 
         @wraps(fn)
         def wrapper(*args, **kwargs) -> xr.Dataset:

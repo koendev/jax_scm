@@ -1,3 +1,10 @@
+"""GABLS1 reference case setup and post-processing.
+
+Implements the stably stratified boundary layer case from the GEWEX
+Atmospheric Boundary Layer Study intercomparison (Cuxart et al. 2006):
+400 m domain, 9-hour run with surface cooling at 0.25 K h⁻¹.
+"""
+
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import xarray as xr
@@ -111,7 +118,20 @@ def get_gabls1(Nz: int = 64, plot: bool = False) -> Simulation:
 
 
 def postproc_gabls1(ds: xr.Dataset) -> xr.Dataset:
-    """Postprocess GABLS1 output to compute additional diagnostics."""
+    """Compute GABLS1 diagnostics: wind magnitude, total stress, and boundary-layer height.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Simulation output dataset as returned by ``out_to_ds``.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with variables ``m`` (wind speed, m s⁻¹), ``tau`` (total
+        stress, m² s⁻²), and ``blh`` (boundary-layer height, m) diagnosed
+        via the 5 % stress criterion of Cuxart et al. (2006).
+    """
     m = (ds["u"] ** 2 + ds["v"] ** 2) ** 0.5  # wind magnitude
     tau = (ds["u_w"] ** 2 + ds["v_w"] ** 2) ** 0.5  # total stress
     blh = (tau / tau.isel(zh=0)).where(lambda x: x < 0.05).idxmax("zh")  # blh where stress < 5% of surface stress

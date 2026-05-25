@@ -1,3 +1,5 @@
+"""HTML diagnostic report builder for SCM simulation output."""
+
 from __future__ import annotations
 
 import base64
@@ -26,6 +28,23 @@ tmpl_html_fig = env.get_template("_html_fig.html")
 
 
 class BaseReport:
+    """HTML report builder that accumulates rendered elements and saves to a file.
+
+    Elements (headings, text, figures, tables) are appended via ``add_*``
+    methods and flushed to disk with :meth:`save`.  The class also implements
+    the context-manager protocol, saving automatically on ``__exit__`` even
+    when rendering raises an exception.
+
+    Parameters
+    ----------
+    title : str
+        Report title shown in the ``<h1>`` heading and ``<title>`` tag.
+    path : str or pathlib.Path
+        Output file path for the HTML report.
+    base_style_css : dict, optional
+        CSS properties applied to the ``<body>`` element.
+    """
+
     def __init__(self, title: str, path: str | pathlib.Path, base_style_css: Dict = None):
         self.title = title
         self.path = path
@@ -53,12 +72,15 @@ class BaseReport:
             self.save()
 
     def add_heading(self, heading: str, level: int) -> None:
+        """Append an HTML heading at the given level (1–6) to the report."""
         self.rendered_elements.append(f"<h{level}>{heading}</h{level}>")
 
     def add_text(self, text: str) -> None:
+        """Append a paragraph of plain text to the report."""
         self.rendered_elements.append(f"<p>{text}</p>")
 
     def add_hr(self) -> None:
+        """Append a horizontal rule (section divider) to the report."""
         self.rendered_elements.append('<hr style="clear: both;"/>')
 
     def add_plotly_fig(self, fig: "go.Figure", caption: str = None, style: Dict = None) -> None:
@@ -137,7 +159,7 @@ class BaseReport:
         style: Dict = None,
         class_name: str = None,
     ) -> None:
-        """Add image to report. Can be provided as bytes or base64 string."""
+        """Append a base64-encoded image (PNG or SVG) to the report; accepts raw bytes or a base64 string."""
         # Only count figures with captions
         if caption is not None:
             self.fig_counter += 1

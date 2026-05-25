@@ -1,3 +1,5 @@
+"""Prognostic, diagnostic, and gradient variable containers for the MYNN closure scheme."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -25,6 +27,15 @@ class ProgVarsMYNN:
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class DiagVarsMYNN:
+    """Turbulence diagnostics produced by the MYNN 2.5 closure.
+
+    All array fields live on half-levels (``Nz+1`` elements) except
+    ``th_th``, ``qke_P_S``, ``qke_P_B``, and ``qke_eps``, which are
+    averaged to full levels (``Nz`` elements) for use in the tendency
+    equations.  Scalar length scales (``L_T``) are domain-integrated
+    values returned as 0-d arrays.
+    """
+
     # Parameterized fluxes and variances
     u_w: jnp.ndarray = meta_field(long_name="Momentum flux (<uw>)", units="m^2/s^2", level="half")
     v_w: jnp.ndarray = meta_field(long_name="Momentum flux (<vw>)", units="m^2/s^2", level="half")
@@ -54,7 +65,9 @@ class DiagVarsMYNN:
     ct2: jnp.ndarray = meta_field(long_name="CT2", units="K/m^(2/3)", level="half")
 
 
-# Gradients of prognostic variables share the same field structure as ProgVarsMYNN but live
-# on half-levels (Nz+1 elements per field) rather than full levels (Nz elements). The alias
-# makes call sites self-documenting without duplicating the dataclass definition.
 GradVarsMYNN = ProgVarsMYNN
+"""Alias for :class:`ProgVarsMYNN` representing vertical gradients of the MYNN prognostic variables.
+
+Each field holds ``Nz+1`` values on half-levels rather than ``Nz`` values on full levels.
+The alias avoids duplicating the dataclass definition while keeping call sites self-documenting.
+"""

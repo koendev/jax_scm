@@ -1,3 +1,5 @@
+"""Local I/O helpers for converting simulation output to/from xarray Datasets."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -18,9 +20,27 @@ def out_to_ds(
     sim: Simulation,
     time: jnp.ndarray | pd.DatetimeIndex | None = None,
 ) -> xr.Dataset:
-    """Convert simulation output to xarray Dataset."""
+    """Convert simulation output to an xarray Dataset with metadata and forcing.
+
+    Parameters
+    ----------
+    out : Output
+        Simulation output containing state, diagnostic, and Monin-Obukhov trajectories.
+    sim : Simulation
+        Simulation configuration used to derive coordinates and metadata.
+    time : jnp.ndarray or pd.DatetimeIndex, optional
+        Time coordinate for the output dataset.  If ``None``, derived from
+        ``sim.t_index_fn`` if available, otherwise raw simulation seconds.
+
+    Returns
+    -------
+    xr.Dataset
+        Merged dataset with state, diagnostics, MO results, and sampled forcing;
+        global attributes include ``name``, ``th_ref``, and time bounds.
+    """
 
     def _get_dims(a: jnp.ndarray) -> tuple[str, ...]:
+        """Return xarray dimension names for a scalar, 1-D (time), or 2-D (time, z/zh) array."""
         if isinstance(a, float) or a.ndim == 0:
             return ()
 
@@ -38,7 +58,7 @@ def out_to_ds(
             raise ValueError(f"Unsupported number of dimensions: {a.ndim}")
 
     def _add_metadata(ds: xr.Dataset, cls, prefix: str = "") -> None:
-        """Add metadata from dataclass fields to xarray Dataset variables."""
+        """Copy field-level metadata from a dataclass definition onto matching Dataset variables."""
         metadata = {f"{prefix}{f.name}": f.metadata for f in dataclasses.fields(cls) if not f.metadata == {}}
         for vname in ds.data_vars:
             vname = str(vname)
@@ -116,7 +136,23 @@ def out_to_ds(
 
 
 def ds_to_dataclass(ds: xr.Dataset, cls: Type[T], prefix: str = "") -> T:
-    """Select matching fields of `cls` dataclass from `ds` and return as instance"""
+    """Reconstruct a dataclass instance from matching variables in an xarray Dataset.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset whose variables include the fields of ``cls``, optionally prefixed.
+    cls : type
+        Dataclass type to instantiate.
+    prefix : str, optional
+        Optional prefix prepended to each field name when looking up variables in
+        ``ds`` (a trailing underscore is added automatically if absent).
+
+    Returns
+    -------
+    T
+        Instance of ``cls`` populated with JAX arrays loaded from ``ds``.
+    """
     # append underscore to prefix
     if prefix and (prefix[-1] != "_"):
         prefix = f"{prefix}_"

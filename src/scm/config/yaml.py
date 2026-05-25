@@ -1,4 +1,4 @@
-"""Custom YAML serializers"""
+"""Custom YAML serializers with ``pathlib.Path`` and tuple round-trip support."""
 
 from __future__ import annotations
 
@@ -40,12 +40,35 @@ yaml.add_representer(tuple, tuple_representer, Dumper=Dumper)
 
 
 def yaml_to_dict(yaml_str: str) -> Dict:
-    """Convert yaml string to dict."""
+    """Parse a YAML string into a plain Python dictionary.
+
+    Parameters
+    ----------
+    yaml_str : str
+        YAML-formatted text.  An empty string returns an empty dict.
+
+    Returns
+    -------
+    dict
+        Parsed key-value mapping; nested structures become nested dicts.
+    """
     if yaml_str == "":
         return {}
     return yaml.load(yaml_str, Loader=Loader)
 
 
 def dict_to_yaml(d: Dict) -> str:
-    """Convert dict to yaml string."""
+    """Serialise a Python dictionary to a YAML string.
+
+    Parameters
+    ----------
+    d : dict
+        Mapping to serialise.  ``pathlib.Path`` values are written with the
+        custom ``!path`` tag; tuples are written as inline YAML sequences.
+
+    Returns
+    -------
+    str
+        YAML-formatted text representation of *d*.
+    """
     return yaml.dump(d, Dumper=Dumper)

@@ -1,3 +1,5 @@
+"""Utility helpers for evaluating and inspecting :class:`~scm.interfaces.Forcing` objects."""
+
 from __future__ import annotations
 
 import warnings
@@ -10,7 +12,22 @@ from scm.interfaces import Forcing
 
 
 def sample_forcing(f: Forcing, t_s: jnp.ndarray) -> Dict[str, jnp.ndarray | None]:
-    """Sample forcing at a given time."""
+    """Evaluate all forcing functions over an array of simulation times.
+
+    Parameters
+    ----------
+    f : Forcing
+        Forcing object whose callable fields are evaluated.
+    t_s : jnp.ndarray
+        1D array of simulation times in seconds at which to sample the forcing.
+
+    Returns
+    -------
+    dict[str, jnp.ndarray | None]
+        Dictionary mapping forcing field names to sampled arrays.  Fields that
+        are ``None`` on ``f`` are returned as ``None``.  Large-scale tendencies
+        (``ls_tends``) are not sampled and a warning is emitted if present.
+    """
 
     def _sample(fn, ndim_expected: int) -> jnp.ndarray | None:
         """Expand scalar or 1D output to expected dimensions.

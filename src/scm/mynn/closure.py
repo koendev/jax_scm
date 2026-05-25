@@ -1,3 +1,17 @@
+"""MYNN level-2.5 turbulence closure.
+
+Implements the Mellor-Yamada-Nakanishi-Niino (MYNN) level-2.5 scheme following
+Nakanishi & Niino (2009).  The public entry point is :func:`init_closure`, which
+returns a compiled closure function suitable for use with the JAX-SCM time
+steppers.
+
+References
+----------
+Nakanishi, M., and H. Niino, 2009: Development of an Improved Turbulence Closure
+Model for the Atmospheric Boundary Layer. *J. Meteor. Soc. Japan*, **87**, 895–912.
+https://doi.org/10.2151/jmsj.87.895
+"""
+
 from __future__ import annotations
 
 import dataclasses
@@ -20,20 +34,45 @@ from scm.safe_math import safe_root
 class MYNNParams:
     """MYNN level-2.5 closure constants (Nakanishi & Niino 2009, eq 66)."""
 
+    #: Stability-function coefficient (momentum).
     A1: float = 1.18
+    #: Stability-function coefficient (heat).
     A2: float = 0.665
+    #: Master length-scale coefficient; controls surface TKE BC via ``qke_sfc = B1^(2/3) * u_st²``.
     B1: float = 24.0
+    #: Dissipation length-scale coefficient.
     B2: float = 15.0
+    #: Pressure covariance coefficient (momentum).
     C1: float = 0.137
+    #: Return-to-isotropy coefficient.
     C2: float = 0.75
+    #: Buoyancy covariance coefficient.
     C3: float = 0.352
+    #: Cross-correlation coefficient (currently unused at level 2.5).
     C4: float = 0.0
+    #: TKE transport coefficient.
     C5: float = 0.2
+    #: Critical flux-Richardson-number numerator coefficient (below eq A4, NN09).
     gamma1: float = 0.235  # below eq A4, NN09
 
 
 def filter_121(x: jnp.ndarray) -> jnp.ndarray:
-    """1-2-1 filter to suppress vertical oscillations."""
+    """Apply a 1-2-1 weighted smoother along the vertical axis.
+
+    Boundary values are extended with ``reflect`` padding so that the top
+    half-level weight is ``(x[-2] + x[-1]) / 2`` rather than ``3/4 * x[-1]``,
+    which gives more effective damping of oscillations near the domain top.
+
+    Parameters
+    ----------
+    x : jnp.ndarray
+        1-D array on half-levels (``Nz+1`` elements).
+
+    Returns
+    -------
+    jnp.ndarray
+        Smoothed array with the same shape as ``x``.
+    """
     # "reflect" padding at boundaries: top value becomes (x[-2]+x[-1])/2, which is more effective
     # at damping oscillations there than edge padding which weights L[-1] at 3/4.
     x_padded = jnp.pad(x, 1, mode="reflect")
@@ -41,7 +80,22 @@ def filter_121(x: jnp.ndarray) -> jnp.ndarray:
 
 
 def get_qke_sfc(u_st: jnp.ndarray, B1: float) -> jnp.ndarray:
-    """Surface boundary condition for QKE (q^2 = 2*TKE)."""
+    """Compute the surface boundary condition for QKE (``q² = 2·TKE``).
+
+    Implements MY82 eq. 54: ``qke_sfc = B1^(2/3) · u_st²``.
+
+    Parameters
+    ----------
+    u_st : jnp.ndarray
+        Friction velocity (scalar, m/s).
+    B1 : float
+        Master length-scale coefficient from :class:`MYNNParams`.
+
+    Returns
+    -------
+    jnp.ndarray
+        Surface QKE value (scalar, m²/s²).
+    """
     return safe_root(B1, 2 / 3) * u_st**2  # MY82, eq. 54
 
 
@@ -78,6 +132,34 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
     #     return w_thv, ql
 
     def _closure(state: ProgVarsMYNN, grads: GradVarsMYNN, mo_res: MOResult, params: MYNNParams) -> DiagVarsMYNN:
+        """Evaluate the MYNN 2.5 closure for one time step.
+
+        Computes length scales (``L_S``, ``L_T``, ``L_B``), stability functions
+        (``SM``, ``SH``) via the level-2 and level-2.5 systems (NN09 §3), eddy
+        diffusivities, turbulent fluxes, and TKE budget terms.  Lower boundary
+        conditions from the Monin-Obukhov surface layer are applied to all flux
+        arrays before returning.
+
+        Parameters
+        ----------
+        state : ProgVarsMYNN
+            Prognostic state on full levels at the current time step.
+        grads : GradVarsMYNN
+            Vertical gradients of the prognostic state on half-levels (``Nz+1``
+            elements per field).
+        mo_res : MOResult
+            Surface-layer result providing friction velocity, surface fluxes, and
+            Obukhov length for lower boundary conditions.
+        params : MYNNParams
+            MYNN closure constants.  Passed explicitly so ``jax.grad`` can
+            differentiate through them.
+
+        Returns
+        -------
+        DiagVarsMYNN
+            Turbulent fluxes, length scales, eddy diffusivities, and TKE budget
+            terms on half- and full levels.
+        """
         # Unpack params for readability
         A1, A2, B1, B2, C1 = params.A1, params.A2, params.B1, params.B2, params.C1
         C2, C3, _, C5 = params.C2, params.C3, params.C4, params.C5

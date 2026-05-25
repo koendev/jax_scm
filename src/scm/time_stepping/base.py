@@ -1,3 +1,5 @@
+"""Unified simulation entry point for JAX-SCM time integration."""
+
 from __future__ import annotations
 
 import jax
@@ -14,7 +16,43 @@ from scm.time_stepping.utils import StepCarry
 
 
 def simulate(model: ModelFn, sim: Simulation, cfg: Namelist, params=None) -> Output:
-    """Unified simulation entry point with a single outer loop."""
+    """Run a full SCM simulation and return the state trajectory.
+
+    An Euler warmup step initialises the AB2 history, then the chosen scheme
+    (explicit AB2 or implicit Crank-Nicolson) advances the state.  The outer
+    loop saves one snapshot per ``cfg.dt_s_out`` interval; inner physics steps
+    run at ``cfg.dt_s`` (or adaptively when ``cfg.adaptive_timestep`` is set).
+
+    Parameters
+    ----------
+    model : ModelFn
+        Right-hand-side function with signature
+        ``(t_s, state, params) -> (tendencies, DiagVarsMYNN, MOResult)``.
+    sim : Simulation
+        Grid, initial conditions, forcing, and time bounds.
+    cfg : Namelist
+        Solver configuration (time step, integration method, logging, etc.).
+    params : MYNNParams, optional
+        Closure parameters.  Defaults to ``MYNNParams()`` when ``None``.
+
+    Returns
+    -------
+    Output
+        JAX-registered dataclass with fields:
+
+        * ``state_traj`` — ``ProgVarsMYNN`` stacked over ``(N_out + 1,)`` time steps.
+        * ``diag_traj``  — ``DiagVarsMYNN`` stacked over ``(N_out + 1,)`` time steps.
+        * ``mo_traj``    — ``MOResult`` stacked over ``(N_out + 1,)`` time steps.
+        * ``t_s``        — 1-D array of output times in seconds, length ``N_out + 1``.
+
+    Notes
+    -----
+    The outer loop is implemented with ``jax.lax.scan``, making the function
+    fully JIT-compilable.  When ``cfg.adaptive_timestep`` is set, the inner
+    loop uses ``jax.lax.while_loop`` to advance by CFL-limited sub-steps within
+    each output interval.  The initial state is prepended to the trajectory so
+    that ``t_s[0] == sim.t_start_s``.
+    """
     if params is None:
         params = MYNNParams()
 

@@ -1,3 +1,10 @@
+"""Thermodynamic and atmospheric conversion utilities.
+
+Provides functions for temperature conversions (dry/virtual/potential),
+surface flux conversions, pressure/density profile integration,
+geostrophic wind computation, and the Coriolis parameter.
+"""
+
 from __future__ import annotations
 
 from typing import Callable, Literal, TypeVar
@@ -13,22 +20,78 @@ T = TypeVar("T")
 
 
 def tv_to_t(*, tv: jnp.ndarray, qv: jnp.ndarray) -> jnp.ndarray:
-    """Compute dry temperature (from virtual air/potential temperature)"""
+    """Convert virtual temperature to dry temperature.
+
+    Parameters
+    ----------
+    tv : jnp.ndarray
+        Virtual (or virtual potential) temperature (K).
+    qv : jnp.ndarray
+        Specific humidity (kg/kg).
+
+    Returns
+    -------
+    jnp.ndarray
+        Dry (or dry potential) temperature (K).
+    """
     return tv / (1 + 0.61 * qv)
 
 
 def t_to_tv(*, t: jnp.ndarray, qv: jnp.ndarray) -> jnp.ndarray:
-    """Compute virtual temperature (from air/potential temperature)"""
+    """Convert dry temperature to virtual temperature.
+
+    Parameters
+    ----------
+    t : jnp.ndarray
+        Dry (or dry potential) temperature (K).
+    qv : jnp.ndarray
+        Specific humidity (kg/kg).
+
+    Returns
+    -------
+    jnp.ndarray
+        Virtual (or virtual potential) temperature (K).
+    """
     return t * (1 + 0.61 * qv)
 
 
 def w_th_to_w_thv(*, th: jnp.ndarray, w_th: jnp.ndarray, w_qv: jnp.ndarray) -> jnp.ndarray:
-    """Sensible heat flux (w'theta') to buoyancy flux (w'theta_v')."""
+    """Convert sensible heat flux (w'theta') to buoyancy flux (w'theta_v').
+
+    Parameters
+    ----------
+    th : jnp.ndarray
+        Dry potential temperature (K).
+    w_th : jnp.ndarray
+        Sensible heat flux, w'theta' (K m/s).
+    w_qv : jnp.ndarray
+        Moisture flux, w'qv' ((kg/kg) m/s).
+
+    Returns
+    -------
+    jnp.ndarray
+        Buoyancy flux w'theta_v' (K m/s).
+    """
     return w_th + 0.61 * th * w_qv
 
 
 def w_thv_to_w_th(*, th: jnp.ndarray, w_thv: jnp.ndarray, w_qv: jnp.ndarray) -> jnp.ndarray:
-    """Buoyancy flux (w'theta_v') to sensible heat flux (w'theta')."""
+    """Convert buoyancy flux (w'theta_v') to sensible heat flux (w'theta').
+
+    Parameters
+    ----------
+    th : jnp.ndarray
+        Dry potential temperature (K).
+    w_thv : jnp.ndarray
+        Buoyancy flux, w'theta_v' (K m/s).
+    w_qv : jnp.ndarray
+        Moisture flux, w'qv' ((kg/kg) m/s).
+
+    Returns
+    -------
+    jnp.ndarray
+        Sensible heat flux w'theta' (K m/s).
+    """
     return w_thv - 0.61 * th * w_qv
 
 
@@ -90,7 +153,18 @@ def uv_geo_from_z(
 
 
 def get_fc(*, lat_deg: float) -> float:
-    """Coriolis parameter at given latitude."""
+    """Compute the Coriolis parameter at a given latitude.
+
+    Parameters
+    ----------
+    lat_deg : float
+        Latitude in degrees.
+
+    Returns
+    -------
+    float
+        Coriolis parameter f = 2 * Omega * sin(lat) (rad/s).
+    """
     omega = 7.2921e-5  # rad/s, Earth's angular velocity
     return float(2 * omega * jnp.sin(jnp.deg2rad(lat_deg)))
 
@@ -117,7 +191,23 @@ def tk_to_th(*, tk: T, p_hPa: T) -> T:
 
 
 def get_p_rho_fn(mode: Literal["th", "tk"]) -> Callable:
-    """Get function to compute pressure and density profiles"""
+    """Build a function that integrates pressure and density profiles upward from the surface.
+
+    Uses the hypsometric equation with the ideal gas law.  The returned
+    callable is JIT-compatible via ``jax.lax.scan``.
+
+    Parameters
+    ----------
+    mode : {"th", "tk"}
+        Temperature input convention: ``"th"`` for potential temperature,
+        ``"tk"`` for absolute temperature.
+
+    Returns
+    -------
+    Callable
+        Function with signature ``(t, qv, z, p_s) -> (p_profile, rho_profile)``.
+        See inner ``get_p_rho`` for argument details.
+    """
 
     def get_p_rho(t, qv, z, p_s):
         """Computes density and pressure profiles using the hypsometric equation.
@@ -177,10 +267,25 @@ def get_p_rho_fn(mode: Literal["th", "tk"]) -> Callable:
     return get_p_rho
 
 
+# Pre-built instances of get_p_rho_fn for the two supported temperature conventions.
+# p_rho_from_th expects potential temperature; p_rho_from_tk expects absolute temperature.
 p_rho_from_th = get_p_rho_fn(mode="th")
 p_rho_from_tk = get_p_rho_fn(mode="tk")
 
 
 def w_eff(*, omega, rho):
-    """Compute vertical velocity (w) from pressure vertical velocity (omega)."""
+    """Convert pressure vertical velocity (omega) to geometric vertical velocity (w).
+
+    Parameters
+    ----------
+    omega : jnp.ndarray
+        Pressure vertical velocity (Pa/s).
+    rho : jnp.ndarray
+        Air density (kg/m^3).
+
+    Returns
+    -------
+    jnp.ndarray
+        Vertical velocity w (m/s); positive upward.
+    """
     return -omega / (rho * consts.g)

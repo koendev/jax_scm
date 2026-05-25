@@ -1,3 +1,5 @@
+"""Shared carry dataclass and state-clipping utilities for all time steppers."""
+
 from __future__ import annotations
 
 import dataclasses

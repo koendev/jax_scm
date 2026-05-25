@@ -1,3 +1,5 @@
+"""Simulation progress loggers used by ``simulate``."""
+
 from __future__ import annotations
 
 import time
@@ -9,6 +11,19 @@ from scm.config import LogConfig, LogLevel
 
 
 def _format_long_duration(d: float) -> str:
+    """Format a duration in seconds as a human-readable string.
+
+    Parameters
+    ----------
+    d : float
+        Duration in seconds.
+
+    Returns
+    -------
+    str
+        Duration formatted as ``"Xs"``, ``"Xmin"``, or ``"Xh"`` depending on
+        magnitude, rounded to one decimal place.
+    """
     unit = "s"
     if d > 120:
         d /= 60
@@ -32,7 +47,7 @@ class SimLogger(Protocol):
 
 
 class _SilentLogger:
-    """No logging at all"""
+    """Logger that suppresses all output."""
 
     def on_start(self) -> None:
         pass
@@ -45,7 +60,7 @@ class _SilentLogger:
 
 
 class _BeginEndLogger:
-    """Log beginning and end and count elapsed time"""
+    """Logger that prints start/end messages and total elapsed wall time."""
 
     def __init__(self):
         self._start_time: float | None = None
@@ -64,7 +79,7 @@ class _BeginEndLogger:
 
 
 class _StepsLogger:
-    """Log progress at each outer step"""
+    """Logger that prints per-outer-step progress with ETA and adaptive-timestep diagnostics."""
 
     def __init__(self, n_total: int, log_every_n: int):
         self.n_total = n_total
@@ -110,7 +125,23 @@ class _StepsLogger:
 
 
 def get_logger(level: LogLevel, n_total: int, log_every_n: int) -> SimLogger:
-    """Return a logger instance based on the specified log level."""
+    """Instantiate a :class:`SimLogger` for the given verbosity level.
+
+    Parameters
+    ----------
+    level : LogLevel
+        Verbosity: ``SILENT``, ``BEGIN_END``, or ``STEPS``.
+    n_total : int
+        Total number of outer steps, used for ETA estimation in ``STEPS`` mode.
+    log_every_n : int
+        Print a progress line every *n* outer steps; ignored unless
+        ``level == LogLevel.STEPS``.
+
+    Returns
+    -------
+    SimLogger
+        Concrete logger instance satisfying the :class:`SimLogger` protocol.
+    """
     if level == LogLevel.SILENT:
         return _SilentLogger()
     if level == LogLevel.BEGIN_END:
@@ -121,5 +152,18 @@ def get_logger(level: LogLevel, n_total: int, log_every_n: int) -> SimLogger:
 
 
 def get_logger_from_cfg(cfg: LogConfig, n_total: int) -> SimLogger:
-    """Convenience wrapper to get logger directly from config."""
+    """Convenience wrapper that calls :func:`get_logger` from a :class:`LogConfig`.
+
+    Parameters
+    ----------
+    cfg : LogConfig
+        Logging configuration with ``level`` and ``log_every_n`` fields.
+    n_total : int
+        Total number of outer steps, forwarded to :func:`get_logger`.
+
+    Returns
+    -------
+    SimLogger
+        Concrete logger instance satisfying the :class:`SimLogger` protocol.
+    """
     return get_logger(level=cfg.level, n_total=n_total, log_every_n=cfg.log_every_n)

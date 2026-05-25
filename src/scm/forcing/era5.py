@@ -1,3 +1,12 @@
+"""ERA5 reanalysis forcing interface.
+
+Builds :class:`~scm.interfaces.Simulation` objects from ERA5 data via either
+the LS2D/CDS downloader or Zarr-based cloud stores (Destine, Google).
+Vertical interpolation uses cubic splines; large-scale forcings include
+geostrophic wind, surface temperature or flux, and optional advective/subsidence
+tendencies.
+"""
+
 from __future__ import annotations
 
 import datetime
@@ -88,7 +97,36 @@ def _get_sim_from_ls2d(
     grid: StaggeredGrid,
     cache_dir: pathlib.Path,
 ) -> Simulation:
+    """Build a :class:`~scm.interfaces.Simulation` from ERA5 data via the LS2D/CDS downloader.
 
+    Downloads ERA5 data with ``ls2d``, computes large-scale forcings, and
+    interpolates to the model grid.
+
+    Parameters
+    ----------
+    name : str
+        Human-readable label for the simulation.
+    start : datetime.date
+        Start date/time of the ERA5 request.
+    end : datetime.date
+        End date/time of the ERA5 request.
+    lat_deg : float
+        Latitude of the column in degrees.
+    lon_deg : float
+        Longitude of the column in degrees.
+    th_ref : float
+        Reference potential temperature used by the model (K).
+    grid : StaggeredGrid
+        Vertical grid onto which ERA5 profiles are interpolated.
+    cache_dir : pathlib.Path
+        Root directory for caching downloaded ERA5 files; a ``ls2d/`` sub-directory
+        is created automatically.
+
+    Returns
+    -------
+    Simulation
+        Fully configured simulation with ERA5-derived initial conditions and forcing.
+    """
     cache_dir = cache_dir / "ls2d"
     cache_dir.mkdir(parents=True, exist_ok=True)
 

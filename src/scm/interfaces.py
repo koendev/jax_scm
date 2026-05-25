@@ -99,6 +99,14 @@ class Simulation:
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class Forcing:
+    """External forcing applied at every model time step.
+
+    Holds time-varying geostrophic winds, surface fluxes or temperatures, moisture
+    fluxes, the Coriolis parameter, a capping-inversion gradient, and optional
+    large-scale tendency functions.  Exactly one of ``w_th_s`` and ``th_s`` must
+    be provided; the other must be ``None``.
+    """
+
     # Geostrophic wind components
     u_geo: ForceSingleFn = meta_field("u geostrophic wind", "m/s", level="full")  # must return (Nz,)
     v_geo: ForceSingleFn = meta_field("v geostrophic wind", "m/s", level="full")  # must return (Nz,)
@@ -177,7 +185,26 @@ class ModelFn(Protocol[ParamsT]):
     def __call__(
         self, t_s: jnp.ndarray, state: ProgVarsMYNN, params: ParamsT
     ) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult]:
-        """Compute tendencies, i.e., right-hand side of ODEs."""
+        """Compute tendencies — the right-hand side of the prognostic ODEs.
+
+        Parameters
+        ----------
+        t_s : jnp.ndarray
+            Current simulation time in seconds (scalar).
+        state : ProgVarsMYNN
+            Prognostic state on full levels at the current time step.
+        params : ParamsT
+            Closure parameters forwarded to the turbulence scheme.
+
+        Returns
+        -------
+        ProgVarsMYNN
+            Tendencies (time derivatives) for every prognostic variable.
+        DiagVarsMYNN
+            Diagnostic fields computed during the tendency evaluation.
+        MOResult
+            Surface-layer result from the Monin-Obukhov solver.
+        """
 
 
 class ClosureFn(Protocol[ParamsT]):
@@ -200,9 +227,38 @@ class ClosureFn(Protocol[ParamsT]):
 
 class ForceSingleFn(Protocol):
     def __call__(self, t_s: jnp.ndarray) -> jnp.ndarray:
-        """Compute time-dependent forcing at time `t_s` for a single variable."""
+        """Return forcing values for a single variable at time ``t_s``.
+
+        Parameters
+        ----------
+        t_s : jnp.ndarray
+            Simulation time in seconds (scalar).
+
+        Returns
+        -------
+        jnp.ndarray
+            Scalar for surface quantities; shape ``(Nz,)`` for column quantities.
+        """
 
 
 class ForceTendsFn(Protocol):
     def __call__(self, t_s: jnp.ndarray, state: ProgVarsMYNN, grads: GradVarsMYNN, diag: DiagVarsMYNN) -> ProgVarsMYNN:
-        """Compute large-scale tendencies at time `t_s` (seconds after simulation start)."""
+        """Return large-scale tendencies to add to the turbulence-driven tendencies.
+
+        Parameters
+        ----------
+        t_s : jnp.ndarray
+            Simulation time in seconds (scalar).
+        state : ProgVarsMYNN
+            Current prognostic state on full levels.
+        grads : GradVarsMYNN
+            Vertical gradients of the prognostic state on half-levels.
+        diag : DiagVarsMYNN
+            Diagnostic fields from the turbulence closure at the current step.
+
+        Returns
+        -------
+        ProgVarsMYNN
+            Large-scale tendency increments on full levels, added directly to
+            the model tendencies before time integration.
+        """

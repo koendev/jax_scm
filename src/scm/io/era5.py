@@ -1,3 +1,5 @@
+"""ERA5 data download helpers for Zarr-based cloud stores (Destine and Google)."""
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +16,7 @@ VARS_SL = ["skt", "ie", "sp", "ishf", "t2m", "u10", "v10", "z"]  # ishf and onwa
 
 
 def _era5_pl_destine() -> xr.Dataset:
-    """Destine zarr has PL and SL data in separate stores and fewer PL levels"""
+    """Open ERA5 from the Destine Zarr store (PL and SL in separate stores, fewer PL levels)."""
     ds_pl = xr.open_dataset(
         "https://data.earthdatahub.destine.eu/era5/reanalysis-era5-pressure-levels-v0.zarr",
         storage_options={"client_kwargs": {"trust_env": True}},
@@ -41,6 +43,7 @@ def _era5_pl_destine() -> xr.Dataset:
 
 
 def _era5_pl_google() -> xr.Dataset:
+    """Open ERA5 from the Google ARCO Zarr store (PL and SL combined, full 37 pressure levels)."""
     # Here, SL and PL in same zarr store
     ds = xr.open_zarr(
         "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3",
@@ -70,8 +73,31 @@ def download_data(
     time_slice: slice | str,
     source: Literal["destine", "google"],
 ) -> xr.Dataset:
-    """Download ERA5 data for given lat/lon and time range.
-    Attention: Pycharm debugger doesn't work here because of async zarr and xarray.
+    """Download ERA5 pressure-level and single-level data for a given location and time range.
+
+    Snaps lat/lon to the 0.25° ERA5 grid and retrieves a 3×3-point neighbourhood
+    (needed for geostrophic wind calculation).  The dataset is loaded fully into
+    memory before returning.
+
+    Parameters
+    ----------
+    lat_deg : float
+        Target latitude in degrees (−90 to 90).
+    lon_deg : float
+        Target longitude in degrees (−180 to 180; converted internally to 0–360).
+    time_slice : slice or str
+        xarray-compatible time selection passed to ``ds.sel(time=time_slice)``.
+    source : {"destine", "google"}
+        Zarr store to use: ``"google"`` (ARCO, 37 levels) or ``"destine"``
+        (Copernicus Destination Earth).
+
+    Returns
+    -------
+    xr.Dataset
+        ERA5 dataset loaded into memory with pressure-level variables
+        (``z``, ``u``, ``v``, ``q``, ``t``) and single-level variables
+        (``skt``, ``ie``, ``sp``, ``ishf``, ``t2m``, ``u10``, ``v10``,
+        ``z_sfc``).
     """
     print(f"Downloading ERA5 data ({source})... This may take a while.")
 

@@ -1,3 +1,10 @@
+"""Andren 1994 neutral Ekman-layer reference case setup and post-processing.
+
+Reproduces the steady-state neutral planetary boundary layer from Andren et al.
+(1994), driven by a constant 10 m s⁻¹ geostrophic wind and zero surface heat
+flux.  Initial profiles are read from Table A1 of that paper.
+"""
+
 import pathlib
 
 import numpy as np
@@ -13,6 +20,21 @@ from scm.mynn.interfaces import ProgVarsMYNN
 
 
 def get_andren1994(Nz: int = 40) -> Simulation:
+    """Build the Andren et al. (1994) neutral Ekman-layer simulation.
+
+    Parameters
+    ----------
+    Nz : int, optional
+        Number of vertical grid levels.  Defaults to 40.
+
+    Returns
+    -------
+    Simulation
+        Configured simulation with neutral forcing (zero surface heat and
+        moisture fluxes), 10 m s⁻¹ geostrophic wind, and initial profiles
+        interpolated from Andren et al. (1994) Table A1.  Time is normalised
+        to inertial periods (``t_index_fn = t_s * f_c``).
+    """
     grid = StaggeredGrid(Nz=Nz, H=1500)
 
     # f_c = convert.get_fc(lat_deg=45)
@@ -56,7 +78,23 @@ def get_andren1994(Nz: int = 40) -> Simulation:
 
 
 def postproc_andren1994(ds: xr.Dataset) -> xr.Dataset:
-    """Diagnosed values for Andren 1994 validation"""
+    """Compute Andren et al. (1994) validation diagnostics from simulation output.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Simulation output dataset as returned by ``out_to_ds``, with time
+        coordinate in inertial periods.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset containing: ``tke_int_norm`` (normalised vertically-integrated
+        TKE), ``C_u`` and ``C_v`` (Ekman transport components), ``phi_m``
+        (surface-layer non-dimensional wind shear vs log-mean height), and
+        ``uw_norm`` / ``vw_norm`` (normalised momentum-flux profiles averaged
+        over the last 3 inertial periods).
+    """
     # Normalized vertically integrated TKE
     f = ds["frc_f_c"].item()
     tke_int = np.trapezoid(y=ds["qke"] / 2, x=ds["z"])

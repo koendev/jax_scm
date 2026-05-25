@@ -1,3 +1,5 @@
+"""Pydantic configuration models and YAML namelist loader for JAX-SCM."""
+
 from __future__ import annotations
 
 import pathlib
@@ -18,6 +20,13 @@ class TimeIntMethod(StrEnum):
 
 
 class AdaptiveTimestepConfig(pydantic.BaseModel):
+    """CFL-based adaptive time-step settings for the explicit AB2 scheme.
+
+    The time step is computed as ``dt = cfl_max * dz² / K_max`` and capped at
+    ``dt_s_max``.  ``cfl_max`` must not exceed 0.5 (AB2 diffusion stability
+    limit).  Ignored when ``time_int == "implicit"``.
+    """
+
     cfl_max: float = 0.5  # Max CFL number for diffusion
     dt_s_max: float = 10.0  # Maximum time step, seconds
 
@@ -33,7 +42,7 @@ class AdaptiveTimestepConfig(pydantic.BaseModel):
 
 
 class LogLevel(StrEnum):
-    """Verbosity for `simulate`."""
+    """Verbosity levels for simulation progress output."""
 
     SILENT = "silent"  # nothing is printed
     BEGIN_END = "begin_end"  # only "begin" and "complete" messages
@@ -41,6 +50,12 @@ class LogLevel(StrEnum):
 
 
 class LogConfig(pydantic.BaseModel):
+    """Logging configuration for ``simulate``.
+
+    Controls verbosity and how frequently progress lines are printed when
+    ``level == LogLevel.STEPS``.
+    """
+
     level: LogLevel = LogLevel.STEPS
     log_every_n: int = 1  # Only log every n outer steps (ignored if level is not STEPS)
 
@@ -69,7 +84,15 @@ class Namelist(pydantic.BaseModel):
 
     @pydantic.model_validator(mode="after")
     def implicit_no_adaptive(self) -> Self:
-        """If time_int is implicit, adaptive_timestep must be None."""
+        """Enforce that adaptive time stepping is disabled for implicit schemes.
+
+        Returns
+        -------
+        Self
+            The validated model instance, with ``adaptive_timestep`` set to
+            ``None`` and a warning emitted when implicit integration was
+            requested alongside an ``AdaptiveTimestepConfig``.
+        """
         if self.time_int == TimeIntMethod.IMPLICIT and self.adaptive_timestep is not None:
             self.adaptive_timestep = None
             warnings.warn("Implicit time stepping set, ignoring adaptive_timestep config.")
@@ -81,7 +104,19 @@ class Namelist(pydantic.BaseModel):
 
 
 def load_namelist(f: str | pathlib.Path) -> Namelist:
-    """Load namelist from YAML file."""
+    """Parse a YAML namelist file into a validated :class:`Namelist` instance.
+
+    Parameters
+    ----------
+    f : str or pathlib.Path
+        Path to a YAML file whose top-level keys correspond to ``Namelist``
+        fields.
+
+    Returns
+    -------
+    Namelist
+        Fully validated configuration object.
+    """
     f = pathlib.Path(f)
     f_dict = yaml_to_dict(f.read_text())
     return Namelist(**f_dict)
