@@ -27,9 +27,9 @@ lint:
 	uv run ruff check --watch
 
 docs:
-	uv run pdoc scm --output-dir site/
+	uv run pdoc scm --output-dir docs/
 	find validation -name "report_*.html" | while read f; do \
-	    dir=site/$$(dirname "$$f"); \
+	    dir=docs/$$(dirname "$$f"); \
 	    mkdir -p "$$dir"; \
 	    cp "$$f" "$$dir/"; \
 	done

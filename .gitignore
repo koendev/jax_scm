@@ -139,8 +139,12 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
+# mkdocs / pdoc generated output (deployed via CI, not committed)
 /site
+/docs/*.html
+/docs/*.js
+/docs/scm/
+/docs/validation/
 
 # mypy
 .mypy_cache/
