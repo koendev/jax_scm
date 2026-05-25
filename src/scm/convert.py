@@ -193,8 +193,7 @@ def tk_to_th(*, tk: T, p_hPa: T) -> T:
 def get_p_rho_fn(mode: Literal["th", "tk"]) -> Callable:
     """Build a function that integrates pressure and density profiles upward from the surface.
 
-    Uses the hypsometric equation with the ideal gas law.  The returned
-    callable is JIT-compatible via ``jax.lax.scan``.
+    Uses the hypsometric equation with the ideal gas law.
 
     Parameters
     ----------

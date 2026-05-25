@@ -1,9 +1,4 @@
-"""Physical and numerical constants used throughout JAX-SCM.
-
-Physical constants are SI-valued. Numerical guards (``smooth_eps``,
-``K_min``, ``L_min``) are applied at point-of-use to keep gradients
-finite rather than in the state-clipping step.
-"""
+"""Physical and numerical constants used throughout JAX-SCM."""
 
 #: Gravitational acceleration (m s⁻²).
 g = 9.81  # m/s^2
@@ -25,7 +20,7 @@ L_v = 2257e3  # J/kg, latent heat of vaporization of water
 #: Minimum value of q² = 2·TKE (m² s⁻²); prevents ``sqrt(0)`` in the closure.
 qke_min = 1e-10  # minimum q^2=2*TKE to avoid sqrt(0) in closure
 
-# Numerical guards for differentiability (point-of-use, not in clip_state)
+# Numerical guards for differentiability
 #: Floor applied to the argument of fractional-power expressions in ``safe_root`` to keep gradients finite.
 smooth_eps = 1e-10  # floor for x^(frac<1) expressions used in safe_root to keep gradients finite
 #: Minimum eddy diffusivity used as the CFL denominator (m² s⁻¹).

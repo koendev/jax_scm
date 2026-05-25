@@ -47,11 +47,7 @@ def simulate(model: ModelFn, sim: Simulation, cfg: Namelist, params=None) -> Out
 
     Notes
     -----
-    The outer loop is implemented with ``jax.lax.scan``, making the function
-    fully JIT-compilable.  When ``cfg.adaptive_timestep`` is set, the inner
-    loop uses ``jax.lax.while_loop`` to advance by CFL-limited sub-steps within
-    each output interval.  The initial state is prepended to the trajectory so
-    that ``t_s[0] == sim.t_start_s``.
+    The initial state is prepended to the trajectory so that ``t_s[0] == sim.t_start_s``.
     """
     if params is None:
         params = MYNNParams()

@@ -20,9 +20,8 @@ from scm.mynn.interfaces import DiagVarsMYNN, GradVarsMYNN, ProgVarsMYNN
 def init_model(sim: Simulation, cfg: Namelist) -> ModelFn:
     """Build the MYNN model function for use by the time stepper.
 
-    Captures the grid, forcing, Monin-Obukhov solver, and MYNN closure in a
-    closure so the returned :class:`~scm.interfaces.ModelFn` is a pure function
-    of ``(t_s, state, params)`` compatible with ``jax.lax.scan`` and ``jax.grad``.
+    Captures the grid, forcing, Monin-Obukhov solver, and MYNN closure so the
+    returned :class:`~scm.interfaces.ModelFn` is a pure function of ``(t_s, state, params)``.
 
     Parameters
     ----------

@@ -1,10 +1,4 @@
-"""Safe math functions with gradient clipping to prevent NaNs.
-
-According to Claude, advantage of defining custom_vjps is that explicit gradient clipping
-keeps gradients alive for multiple repeated applications of the safe function whereas simple
-clipping of the argument sets gradients to zero.
-
-"""
+"""Safe math functions with custom VJPs to prevent NaN gradients."""
 
 from __future__ import annotations
 
