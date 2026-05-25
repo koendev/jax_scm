@@ -27,7 +27,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Build docs
-        run: uv run pdoc scm --output-dir site/
+        run: make docs
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

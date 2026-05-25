@@ -28,3 +28,8 @@ lint:
 
 docs:
 	uv run pdoc scm --output-dir site/
+	find validation -name "report_*.html" | while read f; do \
+	    dir=site/$$(dirname "$$f"); \
+	    mkdir -p "$$dir"; \
+	    cp "$$f" "$$dir/"; \
+	done
