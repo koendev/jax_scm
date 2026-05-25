@@ -1,4 +1,4 @@
-.PHONY: tests coverage badges format lint
+.PHONY: tests coverage badges format lint docs
 
 SRC_FILES  := $(shell find src/scm -name '*.py')
 TEST_FILES := $(shell find tests -name '*.py')
@@ -25,3 +25,6 @@ format:
 
 lint:
 	uv run ruff check --watch
+
+docs:
+	uv run pdoc scm --output-dir site/
