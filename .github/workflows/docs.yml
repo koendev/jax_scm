@@ -17,6 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    if: github.repository == 'mpierzyna/jax_scm'
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +38,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    if: github.repository == 'mpierzyna/jax_scm'
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
