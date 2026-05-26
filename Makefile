@@ -1,7 +1,8 @@
-.PHONY: tests coverage badges format lint docs
+.PHONY: tests coverage badges format lint docs docs_dev
 
 SRC_FILES  := $(shell find src/scm -name '*.py')
 TEST_FILES := $(shell find tests -name '*.py')
+PDOC_ARGS := --docformat numpy --math
 
 
 tests coverage: docs/coverage.xml
@@ -27,9 +28,14 @@ lint:
 	uv run ruff check --watch
 
 docs:
-	uv run pdoc scm --output-dir site/ --docformat numpy
+	uv run pdoc scm ${PDOC_ARGS} --output-dir site/
 	find validation -name "report_*.html" | while read f; do \
 	    dir=site/$$(dirname "$$f"); \
 	    mkdir -p "$$dir"; \
 	    cp "$$f" "$$dir/"; \
 	done
+
+
+docs_dev:
+	# Autorefresh pdoc for documentation writing
+	uv run pdoc scm ${PDOC_ARGS}
