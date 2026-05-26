@@ -23,33 +23,34 @@ ParamsT = TypeVar("ParamsT")
 
 
 class ModelFn(Protocol[ParamsT]):
+    """Protocol defining a model function that computes tendencies for time integration.
+    In other words, this is the right-hand side f(t, y) of dy/dt.
+
+    Parameters
+    ----------
+    t_s : jnp.ndarray
+        Current simulation time in seconds (scalar).
+    state : ProgVarsMYNN
+        Prognostic state on full levels at the current time step.
+    params : ParamsT
+        Closure parameters forwarded to the turbulence scheme.
+
+    Returns
+    -------
+    ProgVarsMYNN
+        Tendencies (time derivatives) for every prognostic variable.
+    DiagVarsMYNN
+        Diagnostic fields computed during the tendency evaluation.
+    MOResult
+        Surface-layer result from the Monin-Obukhov solver.
+    """
+
     def __call__(
         self,
         t_s: jnp.ndarray,
         state: ProgVarsMYNN,
         params: ParamsT,
-    ) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult]:
-        """Protocol defining a model function that computes tendencies for time integration.
-        In other words, this is the right-hand side f(t, y) of dy/dt.
-
-        Parameters
-        ----------
-        t_s : jnp.ndarray
-            Current simulation time in seconds (scalar).
-        state : ProgVarsMYNN
-            Prognostic state on full levels at the current time step.
-        params : ParamsT
-            Closure parameters forwarded to the turbulence scheme.
-
-        Returns
-        -------
-        ProgVarsMYNN
-            Tendencies (time derivatives) for every prognostic variable.
-        DiagVarsMYNN
-            Diagnostic fields computed during the tendency evaluation.
-        MOResult
-            Surface-layer result from the Monin-Obukhov solver.
-        """
+    ) -> Tuple[ProgVarsMYNN, DiagVarsMYNN, MOResult]: ...
 
 
 class ClosureFn(Protocol[ParamsT]):

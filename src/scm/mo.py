@@ -90,7 +90,34 @@ class MOResult:
 
 
 class MOFunc(Protocol):
-    """Protocol for the surface Monin-Obukhov solver returned by ``init_mo_sfc``."""
+    """Protocol for the surface Monin-Obukhov solver returned by ``init_mo_sfc``.
+
+    Parameters
+    ----------
+    u_0 : jnp.ndarray or float
+        Zonal wind speed at the lowest model level (m/s).
+    v_0 : jnp.ndarray or float
+        Meridional wind speed at the lowest model level (m/s).
+    th_0 : jnp.ndarray or float
+        Dry potential temperature at the lowest model level (K).
+    qv_0 : jnp.ndarray or float
+        Specific humidity at the lowest model level (kg/kg).
+    w_qv_s : jnp.ndarray or float
+        Prescribed surface moisture flux w'qv' ((kg/kg) m/s).
+    w_th_s : jnp.ndarray, float, or None
+        Prescribed sensible heat flux w'theta' (K m/s); used when
+        ``prescribe="w_th_s"``, ignored otherwise.
+    th_s : jnp.ndarray, float, or None
+        Prescribed surface potential temperature (K); used when
+        ``prescribe="th_s"``, ignored otherwise.
+
+    Returns
+    -------
+    MOResult
+        Surface-layer diagnostics including friction velocity, fluxes,
+        Obukhov length, and MOST-derived gradients.
+
+    """
 
     def __call__(
         self,
@@ -102,35 +129,7 @@ class MOFunc(Protocol):
         w_qv_s: jnp.ndarray | float,
         w_th_s: jnp.ndarray | float | None = None,
         th_s: jnp.ndarray | float | None = None,
-    ) -> MOResult:
-        """Evaluate surface fluxes using Monin-Obukhov similarity theory.
-
-        Parameters
-        ----------
-        u_0 : jnp.ndarray or float
-            Zonal wind speed at the lowest model level (m/s).
-        v_0 : jnp.ndarray or float
-            Meridional wind speed at the lowest model level (m/s).
-        th_0 : jnp.ndarray or float
-            Dry potential temperature at the lowest model level (K).
-        qv_0 : jnp.ndarray or float
-            Specific humidity at the lowest model level (kg/kg).
-        w_qv_s : jnp.ndarray or float
-            Prescribed surface moisture flux w'qv' ((kg/kg) m/s).
-        w_th_s : jnp.ndarray, float, or None
-            Prescribed sensible heat flux w'theta' (K m/s); used when
-            ``prescribe="w_th_s"``, ignored otherwise.
-        th_s : jnp.ndarray, float, or None
-            Prescribed surface potential temperature (K); used when
-            ``prescribe="th_s"``, ignored otherwise.
-
-        Returns
-        -------
-        MOResult
-            Surface-layer diagnostics including friction velocity, fluxes,
-            Obukhov length, and MOST-derived gradients.
-        """
-        ...
+    ) -> MOResult: ...
 
 
 class MOSimilarityFuncs(abc.ABC):
@@ -391,7 +390,7 @@ def init_mo_sfc(
 
     Returns
     -------
-    Callable
+    MOFunc
         A function that computes surface fluxes based on Monin-Obukhov similarity theory.
     """
     # Set up similarity functions
