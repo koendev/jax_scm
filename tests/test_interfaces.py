@@ -8,7 +8,7 @@ import xarray as xr
 from shared import FIXTURE_ROOT
 
 from scm.examples.gabls1 import get_gabls1
-from scm.interfaces import Output, Simulation
+from scm.interfaces import Forcing, Output, Simulation
 from scm.io.local import ds_to_dataclass
 from scm.mo import MOResult
 from scm.mynn.interfaces import DiagVarsMYNN, ProgVarsMYNN
@@ -159,3 +159,27 @@ class TestOutput:
             # Test that correct type returned. Rest tested by `test_single`
             assert isinstance(out_, Output)
             assert len(out_) == 0
+
+
+class TestForcing:
+    def test_fn_validation(self):
+        """Test that forcing function returns jnp.ndarray"""
+
+        def _fn_ok(t):
+            return jnp.array([0.0, 1.0])  # returns jnp.ndarray
+
+        def _fn_bad(t):
+            return 0.0  # returns float, not jnp.ndarray
+
+        shared = {
+            "u_geo": _fn_ok,
+            "v_geo": _fn_ok,
+            "f_c": 1e-4,
+            "w_qv_s": _fn_ok,
+        }
+
+        with pytest.raises(ValueError, match="must return jnp.ndarray"):
+            _ = Forcing(**shared, w_th_s=_fn_bad)  # typical mistake to not wrap float in jnp.array
+
+        # This doesn't raise error
+        _ = Forcing(**shared, w_th_s=_fn_ok)

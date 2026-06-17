@@ -264,6 +264,18 @@ class Forcing:
         if not ((self.w_th_s is None) or (self.th_s is None)):
             raise ValueError("Exactly one of w_th_s and th_s must be provided.")
 
+        # Get list of all forcing functions, which are expected to return jnp.ndarray
+        forcing_fns = [fn_name for (fn_name, fn_type) in self.__annotations__.items() if "ForceSingleFn" in fn_type]
+
+        # Now check
+        for fn_name in forcing_fns:
+            fn = getattr(self, fn_name)
+            if fn is not None:
+                # Test that the function returns a jnp.ndarray
+                test_output = fn(jnp.array(0.0))
+                if not isinstance(test_output, jnp.ndarray):
+                    raise ValueError(f"Forcing function {fn_name} must return jnp.ndarray, got {type(test_output)}.")
+
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, kw_only=True)
