@@ -15,12 +15,13 @@ import pandas as pd
 import xarray as xr
 from jax import numpy as jnp
 
-from scm import consts, convert
+from scm import consts
 from scm.grid import StaggeredGrid
 from scm.interfaces import Forcing, Simulation
 from scm.mo import MOSettings
 from scm.mynn.closure import MYNNParams
 from scm.mynn.interfaces import ProgVarsMYNN
+from scm.physics.utils import dynamics, thermo
 
 TIMES = ["09:00", "10:00", "12:00", "14:00", "16:00"]
 _T_LONG = [f"1967-08-16T{t}" for t in TIMES]
@@ -55,7 +56,7 @@ def get_wangara_day33(Nz: int = 50) -> Simulation:
     df = pd.read_csv(pathlib.Path(__file__).parent / "day33_0900.csv")
     tk = df["tc"] + 273.15  # Convert to K
     p_hPa = df["p"]
-    th = convert.tk_to_th(tk=tk, p_hPa=p_hPa)
+    th = thermo.tk_to_th(tk=tk, p_hPa=p_hPa)
     th = np.interp(grid.z, df["z"], th)  # Interpolate to model grid
 
     r = df["r"] / 1000  # kg/kg
@@ -96,7 +97,7 @@ def get_wangara_day33(Nz: int = 50) -> Simulation:
     forcing = Forcing(
         u_geo=lambda t_s: u_g,
         v_geo=lambda t_s: v_g,
-        f_c=convert.get_fc(lat_deg=np.abs(-34.5)),  # 34.5°S latitude
+        f_c=dynamics.get_fc(lat_deg=np.abs(-34.5)),  # 34.5°S latitude
         w_th_s=w_thl_fn,
         w_qv_s=w_qw_fn,
         dth_dz_top=dthl_dz_top,

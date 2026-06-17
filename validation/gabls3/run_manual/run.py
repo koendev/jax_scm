@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from scm import consts, convert
+from scm import consts
 from scm.config import load_namelist
 from scm.forcing.interp import get_ts_interp_fn
 from scm.grid import StaggeredGrid
@@ -12,6 +12,7 @@ from scm.io.local import out_to_ds
 from scm.mo import BusingerDyerAltSimFuncs, MOSettings
 from scm.mynn.interfaces import ProgVarsMYNN
 from scm.mynn.model import init_model
+from scm.physics.utils import dynamics, thermo
 from scm.time_stepping.base import simulate
 
 
@@ -61,8 +62,8 @@ def get_gabls3(use_lf: bool, Nz: int = 100, plot: bool = False) -> Simulation:
     qv = jnp.interp(grid.z, z, qv)
 
     p_s = 1024.4 * 100  # surface pressure in Pa
-    p, rho = convert.p_rho_from_tk(t=tk, qv=qv, z=grid.z, p_s=p_s)
-    th = convert.tk_to_th(tk=tk, p_hPa=p / 100)  # potential temperature
+    p, rho = thermo.p_rho_from_tk(t=tk, qv=qv, z=grid.z, p_s=p_s)
+    th = thermo.tk_to_th(tk=tk, p_hPa=p / 100)  # potential temperature
 
     # Initial TKE
     tke = jnp.zeros(grid.Nz)
@@ -162,7 +163,7 @@ def get_gabls3(use_lf: bool, Nz: int = 100, plot: bool = False) -> Simulation:
         Nt=len(time_h),
         Nz=grid.Nz,
     )
-    w = convert.w_eff(omega=omega, rho=rho)  # m/s
+    w = dynamics.w_eff(omega=omega, rho=rho)  # m/s
     w_fn = get_ts_interp_fn(time_s=time_h * 3600, data=w)
 
     # Temperature advection
@@ -175,7 +176,7 @@ def get_gabls3(use_lf: bool, Nz: int = 100, plot: bool = False) -> Simulation:
         Nt=len(time_h),
         Nz=grid.Nz,
     )
-    th_adv = convert.tk_to_th(tk=tk_adv, p_hPa=p / 100)
+    th_adv = thermo.tk_to_th(tk=tk_adv, p_hPa=p / 100)
     th_adv_fn = get_ts_interp_fn(time_s=time_h * 3600, data=th_adv)
 
     # Humidity advection
@@ -242,7 +243,7 @@ def get_gabls3(use_lf: bool, Nz: int = 100, plot: bool = False) -> Simulation:
     forcing = Forcing(
         u_geo=ug_fn,
         v_geo=vg_fn,
-        f_c=convert.get_fc(lat_deg=51.9711),  # Cabauw
+        f_c=dynamics.get_fc(lat_deg=51.9711),  # Cabauw
         w_qv_s=w_qv_s_fn,
         w_th_s=w_th_s_fn,
         ls_tends=ls_tends_fn if use_lf else None,

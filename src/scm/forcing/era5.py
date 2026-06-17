@@ -20,7 +20,8 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import CubicSpline
 
-from scm import consts, convert
+from scm import consts
+from scm.forcing import utils
 from scm.forcing.interp import get_ts_interp_fn, interp_dtindex
 from scm.grid import StaggeredGrid
 from scm.interfaces import Forcing, Simulation
@@ -28,6 +29,7 @@ from scm.io import era5
 from scm.io.cache import XRCache
 from scm.mo import MOSettings
 from scm.mynn.interfaces import ProgVarsMYNN
+from scm.physics.utils import dynamics, thermo
 
 
 def interp(
@@ -336,11 +338,11 @@ def get_era5_sim(
         ds = ds.drop_vars("level")  # drop because it causes problems for interpolation
 
         # Compute geostrophic wind
-        ds_uv_geo = convert.uv_geo_from_z(lat_deg=ds["latitude"], lon_deg=ds["longitude"], z=ds["z"])
+        ds_uv_geo = utils.uv_geo_from_z(lat_deg=ds["latitude"], lon_deg=ds["longitude"], z=ds["z"])
         ds = ds.merge(ds_uv_geo, compat="override")
 
         # Compute potential temperature
-        ds["th"] = convert.tk_to_th(tk=ds["t"], p_hPa=p_hPa)
+        ds["th"] = thermo.tk_to_th(tk=ds["t"], p_hPa=p_hPa)
 
         # We don't need neighbours anymore
         ds = ds.sel(latitude=lat_deg, longitude=lon_deg, method="nearest")
@@ -388,7 +390,7 @@ def get_era5_sim(
     w_th_fn = get_ts_interp_fn(time_s=jnp.array(t.values), data=jnp.array(w_th.values))
 
     # Coriolis parameter
-    f_c = convert.get_fc(lat_deg=abs(lat_deg))
+    f_c = dynamics.get_fc(lat_deg=abs(lat_deg))
 
     # Gather forcing in TransientForcing
     # todo: allow switch between w_th and th_s forcing

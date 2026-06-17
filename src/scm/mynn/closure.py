@@ -20,12 +20,12 @@ import jax
 import jax.numpy as jnp
 
 from scm import consts
-from scm import convert as conv
 from scm.grad import d_dz
 from scm.grid import StaggeredGrid
 from scm.interfaces import ClosureFn
 from scm.mo import MOResult
 from scm.mynn.interfaces import DiagVarsMYNN, GradVarsMYNN, ProgVarsMYNN
+from scm.physics.utils import thermo
 from scm.safe_math import safe_root
 
 
@@ -178,7 +178,7 @@ def init_closure(grid: StaggeredGrid, th_ref: float) -> ClosureFn:
         q = safe_root(qke_h, 1 / 2, eps=consts.qke_min)  # turbulent velocity scale
 
         # Virtual potential temperature gradient needed for buoyancy terms
-        thv = conv.t_to_tv(t=state.th, qv=state.qv)
+        thv = thermo.t_to_tv(t=state.th, qv=state.qv)
         dthv_dz_sfc = (1 + 0.61 * state.qv[0]) * mo_res.dthdz + 0.61 * state.th[0] * mo_res.dqvdz
         dthv_dz_top = (1 + 0.61 * state.qv[-1]) * grads.th[-1] + state.th[-1] * 0.61 * grads.qv[-1]
         dthv_dz = d_dz(thv, dz=grid.dz, bot=dthv_dz_sfc, top=dthv_dz_top)

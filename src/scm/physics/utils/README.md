@@ -1,0 +1,1 @@
+Keep simple physics relations such as conversions between potential and absolute temperature in this module.

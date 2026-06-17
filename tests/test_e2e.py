@@ -11,7 +11,7 @@ from scm.config import LogLevel, load_namelist
 from scm.examples.andren1994.andren1994 import get_andren1994
 from scm.examples.gabls1 import get_gabls1
 from scm.examples.wangara.wangara import get_wangara_day33
-from scm.interfaces import Output, Simulation
+from scm.interfaces import Simulation
 from scm.io.local import out_to_ds
 from scm.mynn.model import init_model
 from scm.time_stepping import simulate

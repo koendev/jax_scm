@@ -16,9 +16,9 @@ import jax
 import jax.numpy as jnp
 
 from scm import consts
-from scm import convert as conv
 from scm.config import yaml
 from scm.metadata import meta_field
+from scm.physics.utils import thermo
 
 logger = logging.getLogger("scm.mo")
 SimFuncType = Callable[[jnp.ndarray], jnp.ndarray]
@@ -452,7 +452,7 @@ def init_mo_sfc(
             u_st, w_th, th_s = _eval_most(zeta, m_0, th_0, w_th, th_s)
 
             # Obukohov length uses buoyancy flux and virtual potential temperature
-            w_thv = conv.w_th_to_w_thv(th=th_0, w_th=w_th, w_qv=w_qv)
+            w_thv = thermo.w_th_to_w_thv(th=th_0, w_th=w_th, w_qv=w_qv)
             L = get_L_obukhov(u_st=u_st, w_thv=w_thv, thv=thv_0)
 
             zeta_new = jnp.clip(z / L, min=-10.0, max=20.0)  # update zeta
@@ -498,7 +498,7 @@ def init_mo_sfc(
             Result of Monin-Obukhov similarity evaluation
         """
         m_0 = jnp.sqrt(u_0**2 + v_0**2)  # wind magnitude
-        thv_0 = conv.t_to_tv(t=th_0, qv=qv_0)  # virtual potential temperature
+        thv_0 = thermo.t_to_tv(t=th_0, qv=qv_0)  # virtual potential temperature
 
         w_th_s = w_th_s if prescribe == "w_th_s" else 0.0
         th_s = th_s if prescribe == "th_s" else 0.0
@@ -531,7 +531,7 @@ def init_mo_sfc(
         return MOResult(
             u_st=u_st,
             w_th=w_th_s,
-            w_thv=conv.w_th_to_w_thv(th=th_0, w_th=w_th_s, w_qv=w_qv_s),
+            w_thv=thermo.w_th_to_w_thv(th=th_0, w_th=w_th_s, w_qv=w_qv_s),
             w_qv=w_qv_s,
             L=L,
             zeta=zeta,
